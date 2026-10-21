@@ -14,7 +14,8 @@
     <repository type="git">https://github.com/Eboracum-de/sunaq-find.git</repository>
     <namespace>SunaqFind</namespace>
     <category>files</category>
-    <category>tools</category>
+    <category>search</category>
+    <category>ai</category>
     <dependencies>
         <nextcloud min-version="23" max-version="35" />
         <php min-version="7.4" />
