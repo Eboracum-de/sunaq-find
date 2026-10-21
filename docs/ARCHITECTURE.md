@@ -88,12 +88,11 @@ SunaQ Find stores only application configuration. It has no conversation state,
 vector store, document mirror, background synchronization database or separate
 middleware service.
 
-## Current limits
+## Design scope
 
-- files / Elasticsearch only;
-- one retrieval round;
-- snippet-based evidence;
-- synchronous LLM calls;
-- no chat or conversation archive;
-- no external web research;
-- no vector or graph retrieval.
+SunaQ Find is intentionally a lightweight AI-assisted file-search application,
+not a general-purpose RAG platform. It uses the existing FullTextSearch /
+Elasticsearch index, one bounded retrieval pass, live Nextcloud ACL enforcement
+and direct synchronous LLM evaluation. Evidence is built from bounded snippets
+of authorized documents. Vector or graph retrieval, web research, chat archives
+and conversation state are deliberately outside this app's scope.
