@@ -1,5 +1,8 @@
 # SunaQ Find - AI-assisted FullTextSearch
 
+[![CI](https://github.com/Eboracum-de/sunaq-find/actions/workflows/ci.yml/badge.svg)](https://github.com/Eboracum-de/sunaq-find/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
+
 SunaQ Find is a lightweight native Nextcloud app that gives you AI-assisted
 natural-language access to your existing Nextcloud FullTextSearch /
 Elasticsearch stack. It deliberately does **not** add a second search stack.
@@ -63,7 +66,7 @@ Nextcloud installations are used as integration targets.
 
 ## Installation
 
-The Nextcloud app id is currently `sunaqfind`. The installed directory must
+The Nextcloud app id is `sunaqfind`. The installed directory must
 therefore be named `sunaqfind`.
 
 For a source checkout, clone the repository into a directory named
