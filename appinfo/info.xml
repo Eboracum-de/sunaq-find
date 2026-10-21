@@ -24,7 +24,7 @@
             <name>SunaQ Find</name>
             <route>sunaqfind.page.index</route>
             <icon>app.svg</icon>
-            <order>90</order>
+            <order>0</order>
         </navigation>
     </navigations>
     <settings>
