@@ -11,6 +11,13 @@ indexed by Nextcloud. Every candidate is checked against the current user's live
 Nextcloud file access before authorized evidence can be sent to the configured
 LLM.
 
+Search requests do not use Nextcloud's AI task-processing pipeline and are not
+queued for a background worker or cron job. Once the existing FullTextSearch
+index is available, each request is handled synchronously, so SunaQ Find does
+not depend on a SunaQ-specific background scheduler for response latency.
+Normal Nextcloud FullTextSearch indexing still needs to keep the Elasticsearch
+index up to date.
+
 SunaQ Find is a spin-off of the SunaQ project. It is intentionally small,
 supports Nextcloud 23–35, and adds little server-side overhead beyond the
 existing FullTextSearch stack and the configured LLM endpoint. It has been
@@ -199,18 +206,14 @@ The main LLM prompts are located in:
 Visible UI strings use Nextcloud localization. English is the source language;
 German translations are included in `l10n/de.json` and `l10n/de.js`.
 
-## Current scope
+## Design scope
 
-SunaQ Find is intentionally small. The current release has:
-
-- one active retrieval arm: files / Elasticsearch;
-- one retrieval round;
-- no vector database;
-- no graph or external web research;
-- no mail or chat archive;
-- no conversation state;
-- no background worker;
-- synchronous PHP calls to the configured LLM.
+SunaQ Find is intentionally a lightweight AI-assisted search layer for files,
+not a full RAG platform. It uses the existing FullTextSearch / Elasticsearch
+index, one bounded retrieval pass, live Nextcloud ACL checks and a direct
+synchronous LLM call. It deliberately does not introduce vector or graph
+retrieval, web research, chat archives, conversation state or a separate
+worker/middleware stack.
 
 If query planning fails, SunaQ Find falls back to a bounded broad lexical search
 using the original question.
