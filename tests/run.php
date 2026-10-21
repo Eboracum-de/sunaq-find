@@ -682,7 +682,7 @@ namespace {
         check(str_contains($light, 'stroke="#fff"'), 'Navigation app icon is not white');
         check(str_contains($dark, 'stroke="#000"'), 'Admin/dark app icon is not black');
         check(str_contains($light, '<circle cx="16" cy="16" r="14"/>'), 'Geometric Q icon circle geometry is missing');
-        check(str_contains($light, 'M20.55 20.55 31.25 31.25'), 'Geometric Q icon tail geometry is missing');
+        check(str_contains($light, 'M21.213 21.213 30.586 30.586'), 'Geometric Q icon tail geometry is missing');
     };
 
     $tests['admin settings read version from Nextcloud app manager'] = function () use ($root): void {
