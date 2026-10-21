@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible SunaQ Find problem
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic or redacted examples where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include SunaQ Find version, Nextcloud version, PHP version, FullTextSearch/Elasticsearch version, and LLM provider/model where relevant.
+      placeholder: |
+        SunaQ Find:
+        Nextcloud:
+        PHP:
+        FullTextSearch / Elasticsearch:
+        LLM provider / model:
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Optional analysis output or logs. Remove document contents, credentials and sensitive hostnames.
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Data hygiene
+      options:
+        - label: I have removed API keys, passwords, private keys and other secrets.
+          required: true
+        - label: I have removed or redacted private document contents and personal/customer data.
+          required: true
