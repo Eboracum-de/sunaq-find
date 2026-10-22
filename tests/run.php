@@ -1794,6 +1794,21 @@ namespace {
         check(str_contains($script, "renderSearchStrategy('')"), 'Search strategy disclosure is not reset between searches');
     };
 
+    $tests['release hardening keeps public review fixes in place'] = function () use ($root): void {
+        $config = file_get_contents($root . '/lib/Service/ConfigService.php');
+        $searchJs = file_get_contents($root . '/js/search.js');
+        $varianceJs = file_get_contents($root . '/js/variance-test.js');
+        $workflow = file_get_contents($root . '/.github/workflows/ci.yml');
+        check(is_string($config) && is_string($searchJs) && is_string($varianceJs) && is_string($workflow), 'Release hardening sources could not be read');
+        check(str_contains($config, "deleteAppValue(Application::APP_ID, $key . '_encrypted')"), 'Stored credential clear path is missing');
+        check(str_contains($config, '$elasticUrlChanged && $elasticPassword ==='), 'Elasticsearch credential is not cleared on endpoint change');
+        check(str_contains($config, '$llmUrlChanged && $llmApiKey ==='), 'LLM credential is not cleared on endpoint change');
+        check(str_contains($searchJs, 'function isLetterOrDigit(character)'), 'Filename underscore emphasis guard is missing');
+        check(!str_contains($varianceJs, 'keine JSON-Antwort'), 'Variance tool still contains a hardcoded German JSON error');
+        check(str_contains($workflow, 'persist-credentials: false'), 'CI checkout still retains repository credentials');
+        check(str_contains($workflow, 'contents: read'), 'CI job permissions are not restricted to contents read');
+    };
+
     $tests['answer renderer supports safe Markdown tables'] = function () use ($root): void {
         $script = file_get_contents($root . '/js/search.js');
         $css = file_get_contents($root . '/css/probe.css');
