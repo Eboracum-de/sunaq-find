@@ -24,6 +24,9 @@ style('sunaqfind', 'probe');
     <p>
         <label for="sunaqfind-elastic-password"><?php p($l->t('Password (optional)')); ?></label><br>
         <input id="sunaqfind-elastic-password" class="long" type="password" value="" autocomplete="new-password" placeholder="<?php p($_['has_elastic_password'] ? $l->t('stored – leave empty to keep') : ''); ?>">
+        <?php if ($_['has_elastic_password']) { ?>
+            <br><label><input id="sunaqfind-clear-elastic-password" type="checkbox"> <?php p($l->t('Clear stored password')); ?></label>
+        <?php } ?>
     </p>
     <p><?php p($l->t('Detected FullTextSearch configuration:')); ?>
         <code><?php p(($_['detected_elastic']['url'] ?: $l->t('not detected')) . ' / ' . ($_['detected_elastic']['index'] ?: $l->t('no index'))); ?></code>
@@ -45,6 +48,9 @@ style('sunaqfind', 'probe');
     <p>
         <label for="sunaqfind-llm-api-key"><?php p($l->t('API key (optional)')); ?></label><br>
         <input id="sunaqfind-llm-api-key" class="long" type="password" value="" autocomplete="new-password" placeholder="<?php p($_['has_llm_api_key'] ? $l->t('stored – leave empty to keep') : ''); ?>">
+        <?php if ($_['has_llm_api_key']) { ?>
+            <br><label><input id="sunaqfind-clear-llm-api-key" type="checkbox"> <?php p($l->t('Clear stored API key')); ?></label>
+        <?php } ?>
     </p>
     <p class="sunaqfind-admin-test-row">
         <button id="sunaqfind-test-llm" type="button"><?php p($l->t('Test AI')); ?></button>

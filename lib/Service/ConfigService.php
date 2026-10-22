@@ -19,6 +19,9 @@ class ConfigService {
     }
 
     public function save(array $values): void {
+        $previousElasticUrl = trim($this->config->getAppValue(Application::APP_ID, 'elastic_url', ''));
+        $previousLlmUrl = trim($this->config->getAppValue(Application::APP_ID, 'llm_url', ''));
+
         foreach (['elastic_url','elastic_index','elastic_username','llm_url','llm_model'] as $key) {
             if (array_key_exists($key, $values)) {
                 $this->config->setAppValue(Application::APP_ID, $key, trim((string)$values[$key]));
@@ -51,8 +54,24 @@ class ConfigService {
                 );
             }
         }
-        $this->saveSecret('elastic_password', (string)($values['elastic_password'] ?? ''));
-        $this->saveSecret('llm_api_key', (string)($values['llm_api_key'] ?? ''));
+
+        $elasticPassword = trim((string)($values['elastic_password'] ?? ''));
+        $llmApiKey = trim((string)($values['llm_api_key'] ?? ''));
+        $elasticUrlChanged = array_key_exists('elastic_url', $values)
+            && trim((string)$values['elastic_url']) !== $previousElasticUrl;
+        $llmUrlChanged = array_key_exists('llm_url', $values)
+            && trim((string)$values['llm_url']) !== $previousLlmUrl;
+
+        $this->saveSecret(
+            'elastic_password',
+            $elasticPassword,
+            !empty($values['clear_elastic_password']) || ($elasticUrlChanged && $elasticPassword === '')
+        );
+        $this->saveSecret(
+            'llm_api_key',
+            $llmApiKey,
+            !empty($values['clear_llm_api_key']) || ($llmUrlChanged && $llmApiKey === '')
+        );
     }
 
     public function getElasticConfig(): array {
@@ -247,12 +266,15 @@ class ConfigService {
         return '';
     }
 
-    private function saveSecret(string $key, string $value): void {
+    private function saveSecret(string $key, string $value, bool $clear = false): void {
         $value = trim($value);
-        if ($value === '') {
+        if ($value !== '') {
+            $this->config->setAppValue(Application::APP_ID, $key . '_encrypted', $this->crypto->encrypt($value));
             return;
         }
-        $this->config->setAppValue(Application::APP_ID, $key . '_encrypted', $this->crypto->encrypt($value));
+        if ($clear) {
+            $this->config->deleteAppValue(Application::APP_ID, $key . '_encrypted');
+        }
     }
 
     private function getSecret(string $key): string {
