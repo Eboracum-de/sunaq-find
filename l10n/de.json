@@ -110,7 +110,9 @@
     "Maximum number of live-ACL-authorized search results included in the evidence sent to the AI. Must not exceed the Elasticsearch hit limit.": "Maximale Anzahl der durch die Live-ACL autorisierten Suchtreffer, die als Evidenz an die KI gesendet werden. Darf die Elasticsearch-Treffergrenze nicht überschreiten.",
     "Maximum Elasticsearch hits must be between 1 and 20.": "Die maximale Anzahl der Elasticsearch-Treffer muss zwischen 1 und 20 liegen.",
     "Maximum documents for AI evaluation must be between 1 and 20.": "Die maximale Anzahl der Dokumente für die KI-Auswertung muss zwischen 1 und 20 liegen.",
-    "Maximum documents for AI evaluation cannot exceed maximum Elasticsearch hits.": "Die maximale Anzahl der Dokumente für die KI-Auswertung darf die maximale Anzahl der Elasticsearch-Treffer nicht überschreiten."
+    "Maximum documents for AI evaluation cannot exceed maximum Elasticsearch hits.": "Die maximale Anzahl der Dokumente für die KI-Auswertung darf die maximale Anzahl der Elasticsearch-Treffer nicht überschreiten.",
+    "Clear stored password": "Gespeichertes Passwort löschen",
+    "Clear stored API key": "Gespeicherten API-Schlüssel löschen"
   },
   "pluralForm": "nplurals=2; plural=(n != 1);"
 }

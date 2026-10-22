@@ -94,9 +94,11 @@
                     elasticIndex: value('sunaqfind-elastic-index'),
                     elasticUsername: value('sunaqfind-elastic-username'),
                     elasticPassword: value('sunaqfind-elastic-password'),
+                    clearElasticPassword: checked('sunaqfind-clear-elastic-password'),
                     llmUrl: value('sunaqfind-llm-url'),
                     llmModel: value('sunaqfind-llm-model'),
                     llmApiKey: value('sunaqfind-llm-api-key'),
+                    clearLlmApiKey: checked('sunaqfind-clear-llm-api-key'),
                     retrievalLanguages: value('sunaqfind-retrieval-languages'),
                     aclPrefilterEnabled: checked('sunaqfind-acl-prefilter'),
                     searchDocumentLimit: value('sunaqfind-search-document-limit'),
@@ -125,6 +127,8 @@
                 result.textContent = t('sunaqfind', 'Saved – analysis mode ') + (config.analysis_mode ? t('sunaqfind', 'on') : t('sunaqfind', 'off'));
                 document.getElementById('sunaqfind-elastic-password').value = '';
                 document.getElementById('sunaqfind-llm-api-key').value = '';
+                setChecked('sunaqfind-clear-elastic-password', false);
+                setChecked('sunaqfind-clear-llm-api-key', false);
             }).catch(function (error) {
                 result.textContent = t('sunaqfind', 'Error: ') + error.message;
             }).finally(function () {

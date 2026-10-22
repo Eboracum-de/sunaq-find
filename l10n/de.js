@@ -8,6 +8,8 @@ OC.L10N.register(
         "Username (optional)": "Benutzername (optional)",
         "Password (optional)": "Passwort (optional)",
         "stored – leave empty to keep": "gespeichert – leer lassen zum Beibehalten",
+        "Clear stored password": "Gespeichertes Passwort löschen",
+        "Clear stored API key": "Gespeicherten API-Schlüssel löschen",
         "Detected FullTextSearch configuration:": "Erkannte FullTextSearch-Konfiguration:",
         "not detected": "nicht erkannt",
         "no index": "kein Index",
