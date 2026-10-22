@@ -10,16 +10,26 @@
     <version>0.4.0</version>
     <licence>AGPL-3.0-or-later</licence>
     <author>Eboracum GmbH</author>
-    <bugs>https://github.com/Eboracum-de/sunaq-find/issues</bugs>
-    <repository type="git">https://github.com/Eboracum-de/sunaq-find.git</repository>
     <namespace>SunaqFind</namespace>
+    <documentation>
+        <user>https://github.com/Eboracum-de/sunaq-find#readme</user>
+        <admin>https://github.com/Eboracum-de/sunaq-find/blob/main/docs/ADMIN.md</admin>
+        <developer>https://github.com/Eboracum-de/sunaq-find/blob/main/docs/ARCHITECTURE.md</developer>
+    </documentation>
     <category>files</category>
     <category>search</category>
     <category>ai</category>
+    <website>https://github.com/Eboracum-de/sunaq-find</website>
+    <bugs>https://github.com/Eboracum-de/sunaq-find/issues</bugs>
+    <repository type="git">https://github.com/Eboracum-de/sunaq-find.git</repository>
     <dependencies>
         <nextcloud min-version="23" max-version="35" />
         <php min-version="7.4" />
     </dependencies>
+    <settings>
+        <admin>OCA\SunaqFind\Settings\Admin</admin>
+        <admin-section>OCA\SunaqFind\Settings\AdminSection</admin-section>
+    </settings>
     <navigations>
         <navigation>
             <name>SunaQ Find</name>
@@ -28,8 +38,4 @@
             <order>0</order>
         </navigation>
     </navigations>
-    <settings>
-        <admin>OCA\SunaqFind\Settings\Admin</admin>
-        <admin-section>OCA\SunaqFind\Settings\AdminSection</admin-section>
-    </settings>
 </info>
