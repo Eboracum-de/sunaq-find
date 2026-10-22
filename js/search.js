@@ -80,17 +80,30 @@
         bindDisclosure(button, panel);
     }
 
+    function isLetterOrDigit(character) {
+        if (!character) { return false; }
+        return /[0-9]/.test(character)
+            || character.toLocaleLowerCase() !== character.toLocaleUpperCase();
+    }
+
     function appendInline(parent, text) {
         var pattern = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
         var last = 0;
         var match;
 
         while ((match = pattern.exec(text)) !== null) {
+            var token = match[0];
+            if (token.startsWith('_')) {
+                var before = match.index > 0 ? text.charAt(match.index - 1) : '';
+                var after = pattern.lastIndex < text.length ? text.charAt(pattern.lastIndex) : '';
+                if (isLetterOrDigit(before) || isLetterOrDigit(after)) {
+                    continue;
+                }
+            }
+
             if (match.index > last) {
                 parent.appendChild(document.createTextNode(text.slice(last, match.index)));
             }
-
-            var token = match[0];
             var node;
             if (token.startsWith('**') || token.startsWith('__')) {
                 node = document.createElement('strong');

@@ -86,7 +86,7 @@
             try {
                 data = JSON.parse(text);
             } catch (e) {
-                throw new Error('HTTP ' + response.status + ': keine JSON-Antwort');
+                throw new Error(t('sunaqfind', 'Server error HTTP ') + response.status + t('sunaqfind', ' (no JSON response)'));
             }
             if (!response.ok || data.ok === false) {
                 throw new Error(data.error || ('HTTP ' + response.status));
