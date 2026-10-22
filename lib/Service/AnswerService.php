@@ -125,7 +125,7 @@ PROMPT;
                     . "\n\nEVIDENCE_JSON:\n" . $evidenceJson],
             ], 1600, true, 90);
 
-            $decoded = json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($this->normalizeJsonPayload($raw), true, 16, JSON_THROW_ON_ERROR);
             if (!is_array($decoded) || !array_key_exists('answer_found', $decoded) || !is_bool($decoded['answer_found'])) {
                 throw new \RuntimeException('Answer assessment is missing');
             }
@@ -149,6 +149,14 @@ PROMPT;
                 new \RuntimeException($this->safeFailureDetail($e))
             );
         }
+    }
+
+    private function normalizeJsonPayload(string $raw): string {
+        $payload = trim($raw);
+        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $payload, $matches) === 1) {
+            return trim((string)$matches[1]);
+        }
+        return $payload;
     }
 
     private function safeFailureDetail(\Throwable $error): string {

@@ -10,6 +10,7 @@ namespace OCA\SunaqFind\Service;
 final class ElasticsearchCompiler {
     public function compile(array $plan, string $originalQuery, int $limit = 15): array {
         $bool = ['must' => [], 'should' => [], 'must_not' => [], 'filter' => []];
+        $bool['filter'][] = ['term' => ['provider' => 'files']];
 
         // Same machine-control sidecar exclusion as the 0.8.7 files arm.
         $bool['must_not'][] = [

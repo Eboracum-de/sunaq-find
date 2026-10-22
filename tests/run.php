@@ -565,9 +565,10 @@ namespace {
         check($result['acl_prefilter_fallback'] === true, 'Technical fallback flag missing');
         check(count($client->calls) === 1, 'Technical fallback should execute exactly one unfiltered ES query');
         check(($client->calls[0]['body']['size'] ?? 0) === 15, 'Technical fallback changed the configured Elasticsearch hit limit');
+        $filter = $client->calls[0]['body']['query']['bool']['filter'] ?? [];
         check(
-            empty($client->calls[0]['body']['query']['bool']['filter']),
-            'Technical fallback unexpectedly contains ACL metadata filter'
+            count($filter) === 1 && (($filter[0]['term']['provider'] ?? '') === 'files'),
+            'Technical fallback must keep only the files provider filter when ACL metadata is unavailable'
         );
     };
 
@@ -607,9 +608,10 @@ namespace {
         check($result['acl_prefilter_applied'] === false, 'Disabled prefilter was reported as applied');
         check($result['acl_prefilter_fallback'] === false, 'Intentional prefilter disablement was reported as fallback');
         check(($client->calls[0]['body']['size'] ?? 0) === 15, 'Disabled prefilter changed the configured Elasticsearch hit limit');
+        $filter = $client->calls[0]['body']['query']['bool']['filter'] ?? [];
         check(
-            empty($client->calls[0]['body']['query']['bool']['filter']),
-            'Disabled prefilter unexpectedly added ACL metadata filters'
+            count($filter) === 1 && (($filter[0]['term']['provider'] ?? '') === 'files'),
+            'Disabled ACL prefilter must still keep the files provider filter'
         );
     };
 
@@ -1413,6 +1415,14 @@ namespace {
         check(str_contains((string)$serialized, 'SEARCH_CONTEXT_JSON'), 'Search context envelope missing');
         check(str_contains((string)$serialized, 'INTERACTION_LANGUAGE: en'), 'Answerer did not receive interaction language');
         check(str_contains((string)$serialized, 'Schulbildung'), 'Search context did not reach answerer');
+    };
+
+    $tests['answerer accepts fully fenced JSON fallback responses'] = function (): void {
+        $llm = new FakeLlmClient("```json\n{\"answer_found\":true,\"answer\":\"Antwort [1]\",\"entity_interpretations\":[]}\n```");
+        $assessment = (new AnswerService($llm))->answerWithAssessment('Frage?', '{"records":[]}');
+
+        check($assessment['answer_found'] === true, 'Fenced JSON answer lost answer_found');
+        check($assessment['answer'] === 'Antwort [1]', 'Fenced JSON answer text was not decoded');
     };
 
     $tests['answerer drops entity interpretations not present in search context'] = function (): void {
