@@ -64,8 +64,7 @@ final class ElasticsearchSearch {
             throw new \RuntimeException('Elasticsearch is not configured and could not be detected');
         }
 
-        $target = max(1, min(20, $limit));
-        $body = $this->compiler->compile($plan, $originalQuery, $target);
+        $target = max(1, min(100, $limit));
 
         $prefilterEnabled = $this->config->isAclPrefilterEnabled();
         $prefilterContext = [
@@ -94,14 +93,6 @@ final class ElasticsearchSearch {
             ? 'applied'
             : ($prefilterEnabled ? 'fallback' : 'disabled');
 
-        if ($prefilterApplied) {
-            $body = $this->withAclPrefilter(
-                $body,
-                (string)$prefilterContext['user'],
-                is_array($prefilterContext['groups'] ?? null) ? $prefilterContext['groups'] : []
-            );
-        }
-
         $state = [
             'allowed' => [],
             'candidate_count' => 0,
@@ -112,15 +103,82 @@ final class ElasticsearchSearch {
             'unresolved_resolution_failed' => 0,
             'seen_file_ids' => [],
         ];
-        $this->authorizeHits(
-            $this->executeSearch($cfg, $body),
-            $state,
-            $target
-        );
+
+        $staged = (string)($plan['search_mode'] ?? '') === 'search_spec'
+            && !empty($plan['has_expansion'])
+            && !empty($plan['primary_lexical_groups'])
+            && !empty($plan['expanded_lexical_groups']);
+
+        $stagePlans = [];
+        if ($staged) {
+            $primaryPlan = $plan;
+            $primaryPlan['lexical_groups'] = $plan['primary_lexical_groups'];
+            $stagePlans[] = ['id' => 'primary', 'plan' => $primaryPlan];
+
+            $expandedPlan = $plan;
+            $expandedPlan['lexical_groups'] = $plan['expanded_lexical_groups'];
+            $stagePlans[] = ['id' => 'expanded', 'plan' => $expandedPlan];
+        } else {
+            $stagePlans[] = ['id' => 'single', 'plan' => $plan];
+        }
+
+        $retrievalStages = [];
+        $lastSearchResult = ['total' => null, 'total_relation' => ''];
+
+        foreach ($stagePlans as $stage) {
+            $stageId = (string)$stage['id'];
+            $stagePlan = is_array($stage['plan'] ?? null) ? $stage['plan'] : $plan;
+            $stageLimit = $target;
+            $baseBody = $this->compiler->compile($stagePlan, $originalQuery, $stageLimit);
+            $baseBody['track_total_hits'] = true;
+
+            if ($stageId === 'expanded' && count($state['allowed']) >= $target) {
+                $retrievalStages[] = [
+                    'stage' => 'expanded',
+                    'executed' => false,
+                    'reason' => 'primary_filled_target',
+                    'authorized_added' => 0,
+                    'query_body' => $baseBody,
+                ];
+                continue;
+            }
+
+            $body = $baseBody;
+            if ($prefilterApplied) {
+                $body = $this->withAclPrefilter(
+                    $body,
+                    (string)$prefilterContext['user'],
+                    is_array($prefilterContext['groups'] ?? null) ? $prefilterContext['groups'] : []
+                );
+            }
+
+            $allowedBefore = count($state['allowed']);
+            $searchResult = $this->executeSearch($cfg, $body);
+            $this->authorizeHits(
+                $searchResult['hits'],
+                $state,
+                $target,
+                $state['candidate_count'] + $stageLimit,
+                $stageId
+            );
+            $lastSearchResult = $searchResult;
+
+            $retrievalStages[] = [
+                'stage' => $stageId,
+                'executed' => true,
+                'reason' => $stageId === 'expanded' ? 'primary_below_target' : '',
+                'authorized_added' => max(0, count($state['allowed']) - $allowedBefore),
+                'total_matches' => $prefilterApplied ? $searchResult['total'] : null,
+                'total_matches_relation' => $prefilterApplied ? $searchResult['total_relation'] : '',
+                'query_body' => $baseBody,
+            ];
+        }
 
         return [
             'config_source' => $cfg['source'],
             'candidate_count' => $state['candidate_count'],
+            'total_matches' => $prefilterApplied ? $lastSearchResult['total'] : null,
+            'total_matches_relation' => $prefilterApplied ? $lastSearchResult['total_relation'] : '',
             'allowed_count' => count($state['allowed']),
             'denied_count' => $state['denied'],
             'unresolved_count' => $state['unresolved'],
@@ -131,6 +189,7 @@ final class ElasticsearchSearch {
             'unresolved_missing_file_id' => $state['unresolved_missing_file_id'],
             'unresolved_not_found' => $state['unresolved_not_found'],
             'unresolved_resolution_failed' => $state['unresolved_resolution_failed'],
+            'retrieval_stages' => $retrievalStages,
             'hits' => $state['allowed'],
         ];
     }
@@ -153,18 +212,38 @@ final class ElasticsearchSearch {
         if (!is_array($rawHits)) {
             throw new \RuntimeException('Elasticsearch returned an invalid search response');
         }
-        return $rawHits;
+
+        $total = null;
+        $relation = '';
+        $rawTotal = $decoded['hits']['total'] ?? null;
+        if (is_int($rawTotal) || (is_string($rawTotal) && preg_match('/^[0-9]+$/', $rawTotal) === 1)) {
+            $total = (int)$rawTotal;
+            $relation = 'eq';
+        } elseif (is_array($rawTotal) && isset($rawTotal['value']) && is_numeric($rawTotal['value'])) {
+            $total = max(0, (int)$rawTotal['value']);
+            $relation = in_array((string)($rawTotal['relation'] ?? ''), ['eq', 'gte'], true)
+                ? (string)$rawTotal['relation']
+                : '';
+        }
+
+        return [
+            'hits' => $rawHits,
+            'total' => $total,
+            'total_relation' => $relation,
+        ];
     }
 
     private function authorizeHits(
         array $rawHits,
         array &$state,
-        int $target
+        int $target,
+        int $candidateStop,
+        string $stageId
     ): void {
         foreach ($rawHits as $hit) {
             if (
                 count($state['allowed']) >= $target
-                || $state['candidate_count'] >= $target
+                || $state['candidate_count'] >= $candidateStop
             ) {
                 break;
             }
@@ -223,6 +302,7 @@ final class ElasticsearchSearch {
                 'mimetype' => (string)($authorization['mimetype'] ?? ''),
                 'url' => (string)($authorization['url'] ?? ''),
                 'score' => isset($hit['_score']) && is_numeric($hit['_score']) ? (float)$hit['_score'] : null,
+                'retrieval_stage' => $stageId,
                 'snippet' => mb_substr(is_string($snippet) ? $snippet : '', 0, 1600, 'UTF-8'),
             ];
         }

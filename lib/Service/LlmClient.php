@@ -28,13 +28,14 @@ class LlmClient {
             throw new \RuntimeException('LLM endpoint/model is not configured');
         }
 
+        // Exercise the same default provider path used by normal searches.
+        // A connection test must not force a tiny token budget or a special
+        // reasoning mode that the configured model may handle differently.
         $this->complete(
             [['role' => 'user', 'content' => 'Reply with exactly OK.']],
-            64,
+            1400,
             false,
-            60,
-            false,
-            'none'
+            60
         );
 
         return [
@@ -172,6 +173,12 @@ class LlmClient {
 
         $content = $this->contentToText($decoded['choices'][0]['message']['content'] ?? null);
         if ($content === '') {
+            $finishReason = trim((string)($decoded['choices'][0]['finish_reason'] ?? ''));
+            if ($finishReason === 'length') {
+                throw new \RuntimeException(
+                    'The configured LLM endpoint exhausted its completion budget before returning usable content'
+                );
+            }
             throw new \RuntimeException('The configured LLM endpoint returned no usable content');
         }
 

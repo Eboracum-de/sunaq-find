@@ -14,6 +14,8 @@ indexed by Nextcloud. Every candidate is checked against the current user's live
 Nextcloud file access before authorized evidence can be sent to the configured
 LLM.
 
+Note, that SunaQ Find is not a replacement for a fully featured RAG. SunaQ Find will respond to tasks like "List all documents pertaining to X in descending order" and will list the documents found. But there is no guarantee for completeness, since the there might exist more relevant documents than fit in the retrieval window.
+
 Search requests do not use Nextcloud's AI task-processing pipeline and are not
 queued for a background worker or cron job. Once the existing FullTextSearch
 index is available, each request is handled synchronously, so SunaQ Find does
@@ -40,6 +42,17 @@ OpenAI, Groq and xAI/Grok.
 - Supports OpenAI-compatible chat-completions endpoints.
 - Keeps user-interface language and document retrieval language independent.
 - Ships English source strings and German translations.
+
+## Slash commands
+
+SunaQ Find supports two lightweight commands in the normal search box:
+
+- `/list [request]` runs the normal query planning, bounded Elasticsearch
+  retrieval, deduplication and live Nextcloud ACL checks, but skips AI answer
+  synthesis and returns the authorized documents in retrieval order.
+- `/help` returns the bundled `docs/HELP.md` help text without running query
+  planning or retrieval. The help text follows the current Nextcloud UI
+  language where a translation is available.
 
 ## Requirements
 
@@ -140,10 +153,15 @@ German lexical retrieval terms.
 ### Retrieval bounds
 
 The administrator can enable or disable the Elasticsearch ACL metadata
-prefilter, set the hard Elasticsearch hit limit (default 15), and separately
-set the maximum number of authorized documents passed to the answer model
-(default 12). The app does not automatically overfetch or refill candidates
-that fail the live ACL check.
+prefilter, set the bounded Elasticsearch retrieval horizon (default 15, maximum
+100), and separately set the maximum number of authorized documents passed to
+the answer model (default 12, maximum 25).
+
+Structured searches can use two bounded lexical stages: a primary search with
+the user's strongest lexical anchors and, only when that stage does not fill the
+configured retrieval target, a broader expansion search. Expansion results are
+appended and never displace primary results. SunaQ Find does not perform
+unbounded overfetching or repeated background retrieval loops.
 
 ### Display options
 
@@ -197,9 +215,11 @@ Security issues should be reported as described in [SECURITY.md](SECURITY.md).
 ## Language handling
 
 SunaQ Find uses English internally for provider-neutral LLM instructions.
-The current Nextcloud language is passed separately as
+The query planner receives the current Nextcloud language as
 `interaction_language`; configured `retrieval_languages` remain a separate
-constraint for document-search vocabulary.
+constraint for document-search vocabulary. The answer layer receives the exact
+original request separately and is instructed to answer in that request's
+language.
 
 The main LLM prompts are located in:
 
@@ -209,17 +229,52 @@ The main LLM prompts are located in:
 Visible UI strings use Nextcloud localization. English is the source language;
 German translations are included in `l10n/de.json` and `l10n/de.js`.
 
-## Design scope
+## Design scope and limits
 
 SunaQ Find is intentionally a lightweight AI-assisted search layer for files,
 not a full RAG platform. It uses the existing FullTextSearch / Elasticsearch
-index, one bounded retrieval pass, live Nextcloud ACL checks and a direct
+index, bounded lexical retrieval, live Nextcloud ACL checks and a direct
 synchronous LLM call. It deliberately does not introduce vector or graph
 retrieval, web research, chat archives, conversation state or a separate
 worker/middleware stack.
 
+This makes SunaQ Find well suited to natural-language document search and
+questions where a relatively small set of strong lexical candidates can be
+identified. Additional concrete qualifiers such as a person, organization,
+recipient, identifier or year usually improve precision substantially.
+
+SunaQ Find does **not** guarantee exhaustive semantic enumeration across a large,
+broad result set. A request such as "find all invoices from an organization in
+2020" can produce many lexically matching documents that mention the
+organization, invoice terminology and the year without all of them actually
+being qualifying invoices. Fully classifying every candidate in such a result
+set would require repeated or batched semantic verification and is outside the
+scope of the lightweight synchronous search path.
+
 If query planning fails, SunaQ Find falls back to a bounded broad lexical search
 using the original question.
+
+### LLM variability and repeatability
+
+Query planning and answer synthesis are LLM operations and are therefore not
+fully deterministic. Repeating the same natural-language request can produce a
+different SearchSpec, different lexical concept groups or expansion terms, and
+therefore a different Elasticsearch candidate set, ranking, evidence set or
+answer. This can occur even when the configured provider accepts deterministic
+sampling parameters, because model/provider behavior itself is not guaranteed to
+be byte-for-byte reproducible.
+
+The deterministic parts of SunaQ Find start after the SearchSpec has been
+normalized: host code owns Elasticsearch compilation, retrieval bounds and the
+live Nextcloud ACL check. These boundaries make authorization and query execution
+predictable, but they do not make the preceding LLM interpretation deterministic.
+
+For important searches, use concrete names, identifiers, dates or other lexical
+anchors where possible. If repeated runs differ materially, enable analysis mode
+temporarily and compare the SearchSpec, compiled retrieval stages and authorized
+evidence before treating the answer as conclusive. A negative answer means that
+the evidence retrieved for that particular interpretation did not reliably answer
+the question; it is not proof that the information is absent from the corpus.
 
 ## Development and contributions
 

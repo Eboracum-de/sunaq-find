@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- Added `/list` for retrieval-only document lists and localized `/help` based on the bundled help text.
+- Fixed the AI connectivity test in the administration section for Ollama.
+- Hardened prompts to avoid occasional LLM-internal renumbering of evidence references.
+- Raised the maximum AI document budget to 25.
+- Introduced two-round Elasticsearch retrieval for more controlled use of semantic expansion.
+
 ## 0.4.0
 
 - Initial public release of SunaQ Find.

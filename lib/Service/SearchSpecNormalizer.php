@@ -44,6 +44,12 @@ final class SearchSpecNormalizer {
             $lexicalQuery = $this->cleanText($originalQuery, 1200);
         }
 
+        $concepts = $this->cleanList($raw['concepts'] ?? null, 16);
+        $conceptGroups = $this->promoteCanonicalConcepts(
+            $this->cleanConceptGroups($raw['concept_groups'] ?? null, 12),
+            $concepts
+        );
+
         return [
             'retrieval_intent' => $this->cleanEnum(
                 $raw['retrieval_intent'] ?? null,
@@ -69,10 +75,11 @@ final class SearchSpecNormalizer {
             ),
             'entities' => $this->cleanList($raw['entities'] ?? null, 16),
             'entity_hints' => $this->cleanEntityHints($raw['entity_hints'] ?? null, 16),
-            'concepts' => $this->cleanList($raw['concepts'] ?? null, 16),
-            'concept_groups' => $this->cleanConceptGroups($raw['concept_groups'] ?? null, 12),
+            'concepts' => $concepts,
+            'concept_groups' => $conceptGroups,
             'constraints' => $this->cleanConstraints($raw['constraints'] ?? null, 12),
             'verification_requirements' => $this->cleanList($raw['verification_requirements'] ?? null, 16),
+            'answer_requirements' => $this->cleanList($raw['answer_requirements'] ?? null, 16),
             // Legacy lexical fields remain part of the 0.8.7 contract.
             'must' => $this->cleanList($raw['must'] ?? null, 24),
             'should' => $this->cleanList($raw['should'] ?? null, 24),
@@ -155,6 +162,59 @@ final class SearchSpecNormalizer {
         return $out;
     }
 
+    private function promoteCanonicalConcepts(array $groups, array $concepts): array {
+        if ($groups === [] || $concepts === []) {
+            return $groups;
+        }
+
+        $canonical = [];
+        foreach ($concepts as $concept) {
+            $text = trim((string)$concept);
+            if ($text !== '') {
+                $canonical[mb_strtolower($text, 'UTF-8')] = $text;
+            }
+        }
+
+        foreach ($groups as &$group) {
+            if (!is_array($group)) {
+                continue;
+            }
+
+            $terms = is_array($group['terms'] ?? null) ? $group['terms'] : [];
+            $primary = is_array($group['primary_terms'] ?? null) ? $group['primary_terms'] : [];
+            $expansion = is_array($group['expansion_terms'] ?? null) ? $group['expansion_terms'] : [];
+
+            $primarySeen = [];
+            foreach ($primary as $term) {
+                $primarySeen[mb_strtolower((string)$term, 'UTF-8')] = true;
+            }
+
+            foreach ($terms as $term) {
+                $folded = mb_strtolower(trim((string)$term), 'UTF-8');
+                if ($folded === '' || !isset($canonical[$folded]) || isset($primarySeen[$folded])) {
+                    continue;
+                }
+                $primary[] = $canonical[$folded];
+                $primarySeen[$folded] = true;
+            }
+
+            $expansion = array_values(array_filter(
+                $expansion,
+                static function ($term) use ($primarySeen): bool {
+                    $folded = mb_strtolower(trim((string)$term), 'UTF-8');
+                    return $folded !== '' && !isset($primarySeen[$folded]);
+                }
+            ));
+
+            $group['primary_terms'] = $primary;
+            $group['expansion_terms'] = $expansion;
+            $group['terms'] = array_values(array_merge($primary, $expansion));
+        }
+        unset($group);
+
+        return $groups;
+    }
+
     private function cleanConceptGroups($value, int $maxItems = 12): array {
         if (!is_array($value) || !$this->isList($value)) {
             return [];
@@ -166,10 +226,29 @@ final class SearchSpecNormalizer {
             if (!is_array($item) || $this->isList($item)) {
                 continue;
             }
-            $terms = $this->cleanList($item['terms'] ?? null, 12);
+            $primaryTerms = $this->cleanList($item['primary_terms'] ?? null, 6);
+            $expansionTerms = $this->cleanList($item['expansion_terms'] ?? null, 12);
+            $legacyTerms = $this->cleanList($item['terms'] ?? null, 12);
+
+            if ($primaryTerms === [] && $legacyTerms !== []) {
+                $primaryTerms = [array_shift($legacyTerms)];
+                $expansionTerms = array_values(array_unique(array_merge($expansionTerms, $legacyTerms)));
+            }
+
+            $terms = [];
+            $seenTerms = [];
+            foreach (array_merge($primaryTerms, $expansionTerms) as $term) {
+                $folded = mb_strtolower($term, 'UTF-8');
+                if ($term === '' || isset($seenTerms[$folded])) {
+                    continue;
+                }
+                $seenTerms[$folded] = true;
+                $terms[] = $term;
+            }
             if ($terms === []) {
                 continue;
             }
+
             $required = (bool)($item['required'] ?? false);
             $key = ($required ? '1:' : '0:') . implode("\x1f", array_map(
                 static function (string $term): string { return mb_strtolower($term, 'UTF-8'); },
@@ -179,7 +258,12 @@ final class SearchSpecNormalizer {
                 continue;
             }
             $seen[$key] = true;
-            $out[] = ['required' => $required, 'terms' => $terms];
+            $out[] = [
+                'required' => $required,
+                'primary_terms' => $primaryTerms,
+                'expansion_terms' => $expansionTerms,
+                'terms' => $terms,
+            ];
             if (count($out) >= $maxItems) {
                 break;
             }
