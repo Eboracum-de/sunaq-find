@@ -60,6 +60,14 @@ lexical clauses by host code. They are exact content/title requirements, not
 claims about the semantic role of a date inside a document; semantic relations
 such as "invoice date is in 2020" remain subject to evidence verification.
 
+Complete filenames recognized in the original request are matched against the
+keyword-analyzed Nextcloud `title` field, preserving punctuation and allowing
+both a bare filename and a path ending in that filename. Identifiers occurring
+inside document content are different: FullTextSearch exposes `content` as an
+analyzed text field without a keyword copy. Identifier constraints are therefore
+required lexical phrase constraints, but punctuation-exact matching inside
+content cannot be guaranteed without changing the host FullTextSearch mapping.
+
 If planning fails or produces no usable positive lexical anchors, the app falls
 back to a broad bounded search using the original question. Deterministically
 recognizable hard constraints from the original request, such as explicit years,
