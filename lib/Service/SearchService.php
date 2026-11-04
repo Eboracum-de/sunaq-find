@@ -160,9 +160,14 @@ final class SearchService {
                 $assessment = $this->answerer->answerWithAssessment($query, $evidence['json'], $answerContext);
                 $answerFound = (bool)$assessment['answer_found'];
                 $answer = (string)$assessment['answer'];
-                $answerCitationExplanations = is_array($assessment['citation_explanations'] ?? null)
-                    ? $assessment['citation_explanations']
-                    : [];
+                $answerCitationExplanations = $this->filterCitationExplanations(
+                    is_array($assessment['citation_explanations'] ?? null)
+                        ? $assessment['citation_explanations']
+                        : [],
+                    is_array($evidence['documents'] ?? null)
+                        ? $evidence['documents']
+                        : []
+                );
                 $answerEntityInterpretations = is_array($assessment['entity_interpretations'] ?? null)
                     ? $assessment['entity_interpretations']
                     : [];
@@ -175,7 +180,18 @@ final class SearchService {
                     $evidence['sources'] = [];
                 } else {
                     [$answer, $cited] = $this->normalizeEvidenceCitations($answer, $evidence['sources']);
-                    if ($cited !== []) {
+                    if ($cited === []) {
+                        $answerFound = false;
+                        $answerCitationExplanations = [];
+                        $answer = $this->t(
+                            'The generated answer could not be verified against the retrieved evidence.'
+                        );
+                        if ($limitNotice !== '') {
+                            $answer .= "\n\n" . $limitNotice;
+                        }
+                        $answer .= "\n\n" . $this->searchGuidance($query, $searchContext);
+                        $evidence['sources'] = [];
+                    } else {
                         $evidence['sources'] = array_values(array_filter(
                             $evidence['sources'],
                             static function (array $source) use ($cited): bool { return in_array((int)$source['index'], $cited, true); }
@@ -641,6 +657,8 @@ final class SearchService {
                         );
                     } elseif ((string)($expandedStage['reason'] ?? '') === 'primary_filled_target') {
                         $lines[] = '- ' . $this->t('Expansion status: not needed because the primary search filled the retrieval target.');
+                    } elseif ((string)($expandedStage['reason'] ?? '') === 'expanded_search_failed') {
+                        $lines[] = '- ' . $this->t('Expansion status: the optional expansion search failed; primary results were retained.');
                     }
                 }
             }
@@ -703,13 +721,13 @@ final class SearchService {
     }
 
     private function strategyExpression(array $groups, array $requiredLiterals = []): string {
-        $parts = [];
+        $requiredParts = [];
+        $optionalParts = [];
         $seen = [];
         foreach ($groups as $group) {
             if (!is_array($group)) {
                 continue;
             }
-            $kind = (string)($group['kind'] ?? '');
             $terms = array_values(array_filter(array_map(
                 static function ($term): string { return trim((string)$term); },
                 is_array($group['terms'] ?? null) ? $group['terms'] : []
@@ -719,9 +737,14 @@ final class SearchService {
             }
             $part = count($terms) === 1 ? $terms[0] : '(' . implode(' | ', $terms) . ')';
             $folded = mb_strtolower($part, 'UTF-8');
-            if (!isset($seen[$folded])) {
-                $seen[$folded] = true;
-                $parts[] = $part;
+            if (isset($seen[$folded])) {
+                continue;
+            }
+            $seen[$folded] = true;
+            if (!empty($group['required'])) {
+                $requiredParts[] = $part;
+            } else {
+                $optionalParts[] = $part;
             }
         }
         foreach ($requiredLiterals as $literal) {
@@ -733,10 +756,18 @@ final class SearchService {
             $folded = mb_strtolower($part, 'UTF-8');
             if (!isset($seen[$folded])) {
                 $seen[$folded] = true;
-                $parts[] = $part;
+                $requiredParts[] = $part;
             }
         }
-        return implode(' + ', $parts);
+
+        $segments = [];
+        if ($requiredParts !== []) {
+            $segments[] = implode(' + ', $requiredParts);
+        }
+        if ($optionalParts !== []) {
+            $segments[] = $this->t('optional: %s', [implode(' | ', $optionalParts)]);
+        }
+        return implode('; ', $segments);
     }
 
     private function alternativeQueries(string $originalQuery, array $context): array {
@@ -894,7 +925,7 @@ final class SearchService {
                 ) . $suffix;
             } elseif ($status === 'probable_typo' && count($alternatives) === 1) {
                 $messages[] = $this->t(
-                    '“%s” was recognized as a possible typo and interpreted for retrieval as “%s”.',
+                    '“%s” was recognized as a possible typo; also considered: “%s”.',
                     [$original, $alternatives[0]]
                 );
             } elseif ($status === 'normalization' && $alternatives !== []) {
@@ -929,6 +960,31 @@ final class SearchService {
         return $messages !== []
             ? $this->t('Search note: %s', [implode(' ', $messages)])
             : '';
+    }
+
+    private function filterCitationExplanations(array $items, array $documents): array {
+        $known = [];
+        foreach ($documents as $document) {
+            if (!is_array($document)) {
+                continue;
+            }
+            $evidenceId = trim((string)($document['evidence_id'] ?? ''));
+            if ($evidenceId !== '') {
+                $known[$evidenceId] = true;
+            }
+        }
+
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $evidenceId = trim((string)($item['evidence_id'] ?? ''));
+            if ($evidenceId !== '' && isset($known[$evidenceId])) {
+                $out[] = $item;
+            }
+        }
+        return $out;
     }
 
     private function stripEvidenceMarkers(string $answer): string {
