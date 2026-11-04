@@ -68,15 +68,16 @@ adds the current Nextcloud user/group identity metadata to the Elasticsearch
 query before the live ACL check. This is an optimization only: the live
 Nextcloud ACL check remains authoritative and is always applied.
 
-**Maximum Elasticsearch hits** is a hard Elasticsearch result limit. The
-default is 15 and the supported range is 1–20. SunaQ Find does not increase
-this value automatically, refill rejected candidates, or use a separate
-overfetch budget. If the prefilter is disabled and all returned hits fail the
-live ACL check, the authorized result is empty.
+**Maximum Elasticsearch hits** is the bounded target for each Elasticsearch
+retrieval stage. The default is 15 and the supported range is 1–100. A single
+expansion query may run when staged retrieval is active and authorized primary
+results do not fill the target; there is no further refill after ACL rejection
+and no separate overfetch budget. If the prefilter is disabled and all returned
+hits fail the live ACL check, the authorized result is empty.
 
 **Maximum documents for AI evaluation** controls how many live-ACL-authorized
 search results can enter the evidence envelope sent to the configured LLM. The
-default is 12, the supported range is 1–20, and the value cannot exceed the
+default is 12, the supported range is 1–25, and the value cannot exceed the
 Elasticsearch hit limit. The difference between both limits can therefore be
 used by the administrator as a deliberate ACL/deduplication buffer.
 
@@ -112,6 +113,9 @@ diagnostics:
 - `acl_prefilter_applied` and `acl_prefilter_fallback`: compatibility flags
   showing whether the Elasticsearch-side identity prefilter was used or a
   technical fallback was required.
+- `total_matches`: Elasticsearch hit total from the metadata-prefiltered
+  query before live ACL checks. It is not a count of live-authorized documents
+  and is `null` when the metadata prefilter is not applied.
 
 These counters are useful for verifying that the installation's ACL boundary is
 actually being exercised. SunaQ Find deliberately exposes only aggregate counts
