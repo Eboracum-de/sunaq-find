@@ -90,10 +90,12 @@ identity metadata cannot be used technically, SunaQ Find sends the same
 deterministically bounded query without the metadata filter and still applies
 live ACL checks to every returned candidate.
 
-The configured Elasticsearch document limit is a hard `size` bound. There is
-no automatic refill, second query, or overfetch budget after ACL rejection. A
-separate administrator-controlled evidence limit bounds how many authorized
-results can be sent to the answer model.
+The configured Elasticsearch document limit is a hard `size` bound for each
+retrieval stage. When staged retrieval applies and the authorized primary
+results do not fill the retrieval target, at most one expansion query runs with
+the same bound. No further refill runs after ACL rejection, and there is no
+separate overfetch budget. A separate administrator-controlled evidence limit
+bounds how many authorized results can be sent to the answer model.
 
 ## Evidence boundary
 
@@ -128,7 +130,8 @@ middleware service.
 
 SunaQ Find is intentionally a lightweight AI-assisted file-search application,
 not a general-purpose RAG platform. It uses the existing FullTextSearch /
-Elasticsearch index, one bounded retrieval pass, live Nextcloud ACL enforcement
-and direct synchronous LLM evaluation. Evidence is built from bounded snippets
+Elasticsearch index, one primary bounded retrieval pass and at most one
+expansion pass, live Nextcloud ACL enforcement and direct synchronous LLM
+evaluation. Evidence is built from bounded snippets
 of authorized documents. Vector or graph retrieval, web research, chat archives
 and conversation state are deliberately outside this app's scope.
