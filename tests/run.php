@@ -304,7 +304,7 @@ namespace {
         public array $calls = [];
         public int $index = 0;
 
-        public function __construct(private array $firstPayload) {}
+        public function __construct(public array $firstPayload) {}
 
         public function newClient(): object {
             return new class($this) {
