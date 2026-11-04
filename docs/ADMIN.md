@@ -95,7 +95,9 @@ CA environments. Prefer a normally trusted certificate where practical.
 
 **Analysis mode** is an administrator diagnostic aid and is disabled by
 default. Enable it temporarily while setting up or troubleshooting a SunaQ Find
-installation, then switch it off again for normal operation.
+installation, then switch it off again for normal operation. **Before a broader
+user rollout, analysis mode should be disabled.** While it is enabled, diagnostic
+data is returned by the normal search endpoint to users of the app.
 
 Besides the SearchSpec and retrieval plan, analysis mode reports aggregate ACL
 diagnostics:
@@ -131,9 +133,11 @@ criteria in a collapsed disclosure.
 The UI follows the current Nextcloud language. English source strings and German
 translations are included.
 
-LLM prompts are internally written in English. The current Nextcloud language is
-sent to the model as `interaction_language`, while configured
-`retrieval_languages` separately control lexical search vocabulary.
+LLM prompts are internally written in English. The query planner receives the
+current Nextcloud language as `interaction_language`, while configured
+`retrieval_languages` separately control lexical search vocabulary. The answer
+model receives the exact original request separately and is instructed to answer
+in the language of that request.
 
 ## Troubleshooting
 
@@ -150,6 +154,23 @@ If the admin connection test works but search fails, check:
 HTTP 401/403/404/429 and temporary provider failures are converted into bounded,
 provider-neutral diagnostics. Analysis mode can expose the sanitized reason
 without returning raw provider responses or credentials.
+
+### Repeated searches return different results
+
+The query planner and answer layer are LLM-driven and are not guaranteed to be
+deterministic. The same request can yield different concept groups, expansion
+terms or verification requirements. Because those fields determine the
+Elasticsearch query, the candidate count, ranking and final evidence can also
+change between runs. A repeated request can therefore alternate between a
+supported answer and an `answer_found=false` result without any index or ACL
+change.
+
+When diagnosing this, compare the analysis-mode SearchSpec and retrieval stages
+across runs rather than only comparing the final prose answer. Large differences
+in `candidate_count`, authorized hits or source sets usually indicate planner
+variance upstream of the answer model. Use more concrete lexical anchors when a
+stable search is important. Do not interpret `answer_found=false` as a corpus-
+wide statement that the requested information does not exist.
 
 ## ACL behavior
 

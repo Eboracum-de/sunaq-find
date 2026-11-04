@@ -1,6 +1,8 @@
 <?php
 script('sunaqfind', 'search');
-script('sunaqfind', 'variance-test');
+if (!empty($_['analysis_mode'])) {
+    script('sunaqfind', 'variance-test');
+}
 style('sunaqfind', 'probe');
 ?>
 <div id="app-content">
@@ -52,10 +54,11 @@ style('sunaqfind', 'probe');
     </section>
 
     <section id="sunaqfind-sources-card" class="sunaqfind-card" hidden>
-        <h3><?php p($l->t('Sources')); ?></h3>
+        <h3 id="sunaqfind-sources-title"><?php p($l->t('Sources')); ?></h3>
         <ol id="sunaqfind-sources" class="sunaqfind-source-list"></ol>
     </section>
 
+<?php if (!empty($_['analysis_mode'])) { ?>
     <details id="sunaqfind-analysis-card" class="sunaqfind-card sunaqfind-analysis" hidden>
         <summary><?php p($l->t('Query analysis and retrieval diagnostics')); ?></summary>
         <pre id="sunaqfind-analysis"></pre>
@@ -126,5 +129,6 @@ style('sunaqfind', 'probe');
             </div>
         </div>
     </details>
+<?php } ?>
 </main>
 </div>

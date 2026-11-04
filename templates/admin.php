@@ -72,12 +72,12 @@ style('sunaqfind', 'probe');
     </p>
     <p>
         <label for="sunaqfind-search-document-limit"><?php p($l->t('Maximum Elasticsearch hits')); ?></label><br>
-        <input id="sunaqfind-search-document-limit" type="number" min="1" max="20" step="1" value="<?php p((string)$_['search_document_limit']); ?>">
-        <br><em><?php p($l->t('Hard limit for documents returned by Elasticsearch. No automatic refill or overfetch is performed.')); ?></em>
+        <input id="sunaqfind-search-document-limit" type="number" min="1" max="100" step="1" value="<?php p((string)$_['search_document_limit']); ?>">
+        <br><em><?php p($l->t('Target maximum for authorized documents kept from Elasticsearch retrieval (up to 100). A bounded expansion query may run when the primary search does not fill this target. AI evaluation remains separately limited.')); ?></em>
     </p>
     <p>
         <label for="sunaqfind-llm-document-limit"><?php p($l->t('Maximum documents for AI evaluation')); ?></label><br>
-        <input id="sunaqfind-llm-document-limit" type="number" min="1" max="20" step="1" value="<?php p((string)$_['llm_document_limit']); ?>">
+        <input id="sunaqfind-llm-document-limit" type="number" min="1" max="25" step="1" value="<?php p((string)$_['llm_document_limit']); ?>">
         <br><em><?php p($l->t('Maximum number of live-ACL-authorized search results included in the evidence sent to the AI. Must not exceed the Elasticsearch hit limit.')); ?></em>
     </p>
     <p>

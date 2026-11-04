@@ -72,16 +72,21 @@ final class ElasticsearchCompiler {
                     continue;
                 }
                 $alternatives = [];
+                $groupKind = (string)($group['kind'] ?? '');
                 foreach (($group['terms'] ?? []) as $term) {
                     $term = trim((string)$term);
                     if ($term !== '') {
-                        $alternatives[] = $this->lexicalTermClause($term);
+                        $alternatives[] = strncmp($groupKind, 'constraint:', 11) === 0
+                            ? $this->constraintTermClause($term)
+                            : $this->lexicalTermClause($term);
                     }
                 }
                 if ($alternatives === []) {
                     continue;
                 }
-                $clause = ['bool' => ['should' => $alternatives, 'minimum_should_match' => 1]];
+                $clause = count($alternatives) === 1
+                    ? $alternatives[0]
+                    : ['dis_max' => ['queries' => $alternatives, 'tie_breaker' => 0.0]];
                 $bool[!empty($group['required']) ? 'must' : 'should'][] = $clause;
             }
 
@@ -106,13 +111,28 @@ final class ElasticsearchCompiler {
             }
         }
 
+        if (in_array($mode, ['fallback_original', 'direct_lexical'], true)) {
+            foreach (($plan['hard_constraints'] ?? []) as $constraint) {
+                $constraint = trim((string)$constraint);
+                if ($constraint !== '') {
+                    $bool['must'][] = $this->constraintTermClause($constraint);
+                }
+            }
+        }
+
         $bool = $this->deduplicate($bool);
-        if ($bool['must'] === [] && $bool['should'] !== []) {
+        if (
+            $bool['should'] !== []
+            && (
+                $bool['must'] === []
+                || in_array($mode, ['fallback_original', 'direct_lexical'], true)
+            )
+        ) {
             $bool['minimum_should_match'] = 1;
         }
 
         return [
-            'size' => max(1, min(20, $limit)),
+            'size' => max(1, min(100, $limit)),
             '_source' => ['file_id', 'fileId', 'id'],
             'query' => ['bool' => $bool],
             'highlight' => [
@@ -126,12 +146,46 @@ final class ElasticsearchCompiler {
     }
 
     private function lexicalTermClause(string $term): array {
+        $value = trim($term);
+        if ($value === '') {
+            return ['match_none' => (object)[]];
+        }
+
+        if (preg_match('/\\s/u', $value) === 1) {
+            return [
+                'bool' => [
+                    'should' => [
+                        ['match' => ['content' => ['query' => $value, 'operator' => 'and']]],
+                        ['match' => ['title' => ['query' => $value, 'operator' => 'and']]],
+                    ],
+                    'minimum_should_match' => 1,
+                ],
+            ];
+        }
+
         return [
             'bool' => [
                 'should' => $this->nextcloudFieldClauses([
-                    'text' => $term,
+                    'text' => $value,
                     'match' => 'match_phrase_prefix',
                 ]),
+                'minimum_should_match' => 1,
+            ],
+        ];
+    }
+
+    private function constraintTermClause(string $term): array {
+        $value = trim($term);
+        if ($value === '') {
+            return ['match_none' => (object)[]];
+        }
+
+        return [
+            'bool' => [
+                'should' => [
+                    ['match_phrase' => ['content' => $value]],
+                    ['match_phrase' => ['title' => $value]],
+                ],
                 'minimum_should_match' => 1,
             ],
         ];

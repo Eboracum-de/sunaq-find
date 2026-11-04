@@ -31,11 +31,13 @@ class ConfigService {
             $languages = $this->normalizeRetrievalLanguages((string)$values['retrieval_languages']);
             $this->config->setAppValue(Application::APP_ID, 'retrieval_languages', implode(',', $languages));
         }
-        foreach (['search_document_limit', 'llm_document_limit'] as $key) {
-            if (array_key_exists($key, $values)) {
-                $value = max(1, min(20, (int)$values[$key]));
-                $this->config->setAppValue(Application::APP_ID, $key, (string)$value);
-            }
+        if (array_key_exists('search_document_limit', $values)) {
+            $value = max(1, min(100, (int)$values['search_document_limit']));
+            $this->config->setAppValue(Application::APP_ID, 'search_document_limit', (string)$value);
+        }
+        if (array_key_exists('llm_document_limit', $values)) {
+            $value = max(1, min(25, (int)$values['llm_document_limit']));
+            $this->config->setAppValue(Application::APP_ID, 'llm_document_limit', (string)$value);
         }
         foreach ([
             'allow_private_network',
@@ -145,13 +147,13 @@ class ConfigService {
     }
 
     public function getSearchDocumentLimit(): int {
-        return $this->intValue('search_document_limit', 15, 1, 20);
+        return $this->intValue('search_document_limit', 15, 1, 100);
     }
 
     public function getLlmDocumentLimit(): int {
         return min(
             $this->getSearchDocumentLimit(),
-            $this->intValue('llm_document_limit', 12, 1, 20)
+            $this->intValue('llm_document_limit', 12, 1, 25)
         );
     }
 

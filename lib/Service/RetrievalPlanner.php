@@ -24,6 +24,26 @@ final class RetrievalPlanner {
         bool $directLexicalRouting = false
     ): array {
         $requiredLiterals = $this->quotedLiterals($originalQuery);
+        $appliedConstraints = $this->safeStructuredConstraints($spec);
+        $hardConstraints = array_values(array_map(
+            static function (array $constraint): string { return (string)$constraint['value']; },
+            $appliedConstraints
+        ));
+        if ($originalQuery !== '') {
+            $safe = $this->hardConstraints->extract($originalQuery);
+            foreach (['filenames', 'identifiers', 'dates', 'years'] as $constraintKind) {
+                foreach (($safe[$constraintKind] ?? []) as $constraint) {
+                    $constraint = trim((string)$constraint);
+                    if ($constraint !== '' && !in_array($constraint, $hardConstraints, true)) {
+                        $hardConstraints[] = $constraint;
+                        $appliedConstraints[] = [
+                            'kind' => 'literal',
+                            'value' => $constraint,
+                        ];
+                    }
+                }
+            }
+        }
 
         if ($filesFallback) {
             return [
@@ -37,6 +57,8 @@ final class RetrievalPlanner {
                 'phrases' => [],
                 'must_not_phrases' => [],
                 'required_literals' => $requiredLiterals,
+                'hard_constraints' => $hardConstraints,
+                'applied_constraints' => $appliedConstraints,
                 'retrieval_arms' => ['files'],
                 'max_rounds' => 1,
             ];
@@ -59,15 +81,26 @@ final class RetrievalPlanner {
                 'phrases' => [],
                 'must_not_phrases' => [],
                 'required_literals' => $requiredLiterals,
+                'hard_constraints' => $hardConstraints,
+                'applied_constraints' => $appliedConstraints,
                 'retrieval_arms' => ['files'],
                 'max_rounds' => 1,
             ];
         }
 
-        $lexicalGroups = [];
-        $seenGroups = [];
+        $primaryLexicalGroups = [];
+        $expandedLexicalGroups = [];
+        $primarySeenGroups = [];
+        $expandedSeenGroups = [];
+        $hasExpansion = false;
 
-        $addGroup = function (bool $required, array $terms, string $kind) use (&$lexicalGroups, &$seenGroups): void {
+        $addGroup = static function (
+            array &$target,
+            array &$seenGroups,
+            bool $required,
+            array $terms,
+            string $kind
+        ): void {
             $cleaned = [];
             $seenTerms = [];
             foreach ($terms as $raw) {
@@ -82,7 +115,8 @@ final class RetrievalPlanner {
             if ($cleaned === []) {
                 return;
             }
-            $key = ($required ? '1:' : '0:') . implode("\x1f", array_map(
+            $kindKey = strncmp($kind, 'constraint:', 11) === 0 ? $kind : 'lexical';
+            $key = ($required ? '1:' : '0:') . $kindKey . ':' . implode("\x1f", array_map(
                 static function (string $term): string { return mb_strtolower($term, 'UTF-8'); },
                 $cleaned
             ));
@@ -90,7 +124,7 @@ final class RetrievalPlanner {
                 return;
             }
             $seenGroups[$key] = true;
-            $lexicalGroups[] = [
+            $target[] = [
                 'required' => $required,
                 'kind' => $kind,
                 'terms' => $cleaned,
@@ -99,30 +133,44 @@ final class RetrievalPlanner {
 
         foreach (($spec['entities'] ?? []) as $entity) {
             $text = trim((string)$entity);
-            if ($text !== '') {
-                $addGroup(true, [$text], 'entity');
+            if ($text === '') {
+                continue;
             }
+            $addGroup($primaryLexicalGroups, $primarySeenGroups, true, [$text], 'entity');
+            $addGroup($expandedLexicalGroups, $expandedSeenGroups, true, [$text], 'entity');
         }
 
         foreach (($spec['concept_groups'] ?? []) as $group) {
             if (!is_array($group)) {
                 continue;
             }
-            $addGroup(
-                (bool)($group['required'] ?? false),
-                is_array($group['terms'] ?? null) ? $group['terms'] : [],
-                'concept'
-            );
-        }
 
-        if ($originalQuery !== '') {
-            $safe = $this->hardConstraints->extract($originalQuery);
-            foreach (['filenames', 'identifiers', 'dates', 'years'] as $constraintKind) {
-                foreach (($safe[$constraintKind] ?? []) as $constraint) {
-                    $addGroup(true, [(string)$constraint], 'constraint:' . $constraintKind);
-                }
+            $required = (bool)($group['required'] ?? false);
+            $primaryTerms = is_array($group['primary_terms'] ?? null) ? $group['primary_terms'] : [];
+            $expansionTerms = is_array($group['expansion_terms'] ?? null) ? $group['expansion_terms'] : [];
+            $allTerms = is_array($group['terms'] ?? null) ? $group['terms'] : [];
+
+            if ($primaryTerms === [] && $allTerms !== []) {
+                $primaryTerms = [(string)$allTerms[0]];
+                $expansionTerms = array_slice($allTerms, 1);
+            }
+
+            $addGroup($primaryLexicalGroups, $primarySeenGroups, $required, $primaryTerms, 'concept:primary');
+            $addGroup($expandedLexicalGroups, $expandedSeenGroups, $required, $allTerms, 'concept:expanded');
+
+            if ($expansionTerms !== []) {
+                $hasExpansion = true;
             }
         }
+
+        foreach ($appliedConstraints as $constraint) {
+            $value = (string)($constraint['value'] ?? '');
+            $kind = 'constraint:' . (string)($constraint['kind'] ?? 'literal');
+            $addGroup($primaryLexicalGroups, $primarySeenGroups, true, [$value], $kind);
+            $addGroup($expandedLexicalGroups, $expandedSeenGroups, true, [$value], $kind);
+        }
+
+        $lexicalGroups = $expandedLexicalGroups;
 
         $structuredIntent = $lexicalGroups !== [];
 
@@ -131,15 +179,61 @@ final class RetrievalPlanner {
             'semantic_query' => trim((string)($spec['semantic_query'] ?? '')),
             'elastic_query' => $structuredIntent ? '' : trim((string)($spec['elastic_query'] ?? '')),
             'lexical_groups' => $lexicalGroups,
+            'primary_lexical_groups' => $primaryLexicalGroups,
+            'expanded_lexical_groups' => $expandedLexicalGroups,
+            'has_expansion' => $hasExpansion,
             'must' => $this->texts($spec['must'] ?? []),
             'should' => $this->texts($spec['should'] ?? []),
             'must_not' => $this->texts($spec['must_not'] ?? []),
             'phrases' => $this->texts($spec['phrases'] ?? []),
             'must_not_phrases' => $this->texts($spec['must_not_phrases'] ?? []),
             'required_literals' => $requiredLiterals,
+            'hard_constraints' => [],
+            'applied_constraints' => $appliedConstraints,
             'retrieval_arms' => ['files'],
-            'max_rounds' => 1,
+            'max_rounds' => $hasExpansion ? 2 : 1,
         ];
+    }
+
+    private function safeStructuredConstraints(array $spec): array {
+        $out = [];
+        $seen = [];
+
+        foreach (is_array($spec['constraints'] ?? null) ? $spec['constraints'] : [] as $constraint) {
+            if (!is_array($constraint)) {
+                continue;
+            }
+
+            $kind = mb_strtolower(trim((string)($constraint['kind'] ?? '')), 'UTF-8');
+            $value = trim((string)($constraint['value'] ?? ''));
+            if ($kind === '' || $value === '') {
+                continue;
+            }
+
+            if ($kind === 'year') {
+                if (preg_match('/^(?:18|19|20|21)\d{2}$/', $value) !== 1) {
+                    continue;
+                }
+            } elseif ($kind === 'date') {
+                if (preg_match('/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})$/u', $value) !== 1) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+
+            $key = $kind . "\x1f" . mb_strtolower($value, 'UTF-8');
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'kind' => $kind,
+                'value' => $value,
+            ];
+        }
+
+        return $out;
     }
 
     private function quotedLiterals(string $query): array {

@@ -30,12 +30,18 @@ Do not confuse these. A user may use an English UI while searching German
 documents, or vice versa.
 
 USER TEXT
-The user text can contain:
-1. the actual search request;
-2. instructions about how the request must be interpreted.
-Separate these before building the SearchSpec. Instructions about spelling,
-literal wording, excluded readings, or mandatory terms control interpretation;
-they are not additional search content.
+The user text can contain three independent classes of information.
+This generalizes the earlier distinction between the actual search request and
+instructions about how the request must be interpreted:
+1. information_interest: what information or documents the user wants;
+2. search_specifications: instructions about spelling, literal wording, excluded
+   readings, or how search terms must be interpreted;
+3. answer_requirements: instructions about output shape, requested fields,
+   sorting, verbosity, or presentation.
+Separate these before building the SearchSpec. Search specifications and answer
+requirements are not additional search content. In particular, a field requested
+for the final answer must not become a lexical retrieval term merely because the
+user wants it displayed.
 
 ARCHITECTURE
 - The planner describes intent; deterministic host code owns retrieval syntax.
@@ -61,14 +67,21 @@ FIELDS
   that occur verbatim in the user text. Each item has original, status,
   alternatives. original MUST occur character-for-character in the user text.
   status is exactly one of:
-  - probable_typo: one highly probable correction; keep original and correction.
-  - normalization: add canonical spelling/designation while keeping the original.
+  - probable_typo: one highly probable correction. Preserve the original in
+    term_interpretations for transparency, but the chosen correction may replace
+    it in primary retrieval unless the user explicitly requests literal
+    preservation (for example with double quotes).
+  - normalization: add a canonical spelling/designation while preserving the
+    original transformation record. Retrieval may use the canonical form when
+    that is the chosen interpretation.
   - preserved: user explicitly wants the original form preserved; alternatives
     may be noted but must not silently replace it.
   - ambiguous: multiple plausible readings; none is automatically correct.
   - unrecognized: not reliably understood; alternatives may be empty.
   Do not use term_interpretations for ordinary synonyms; those belong in
-  concept_groups. Never silently replace an explicit user term.
+  concept_groups. Never silently replace an explicit user term: every automatic
+  correction/normalization must be recorded in term_interpretations and exposed
+  by the UI.
 - semantic_query: short standalone natural-language formulation of the chosen
   interpretation, written in interaction_language. If the request is already a
   clear question, it may remain close to the original.
@@ -79,26 +92,52 @@ FIELDS
   named entities referenced by the request.
 - entity_hints: type hints only when reliable.
 - concepts: canonical document types or central subject concepts.
-- concept_groups: lexical alternatives for the SAME criterion. Each item has
-  required and terms.
+- concept_groups: lexical forms for the SAME semantic anchor. Each item has
+  required, primary_terms, and expansion_terms.
+  - primary_terms are the user's actual lexical anchor plus the canonical
+    concept form when it is merely a grammatical/inflectional variant of the
+    same word (for example German "Rechnungen" and canonical "Rechnung").
+    Keep this set small and semantically exact.
+  - expansion_terms are recall-oriented synonyms, translations, abbreviations,
+    compounds, or related lexical forms for a later fallback/expansion search.
+    Do not demote a canonical form of the same concept into expansion_terms.
+  - Do not repeat a primary term in expansion_terms.
   - If concepts is non-empty, provide at least one matching concept_group.
-  - required=true means a relevant file must contain at least one term from the
-    group; host code compiles this deterministically as MUST(OR(...)).
-  - Put different mandatory criteria into different groups.
+  - required=true means a relevant file must satisfy at least one term from the
+    selected stage of that group.
+  - Put independently mandatory semantic anchors into different required groups.
+  - If one compact concept or compound combines several independently expressible
+    mandatory components, split those components into separate required groups.
+    Example: German "Autokauf" combines a purchase event and a motor vehicle;
+    represent purchase and motor vehicle as separate required groups.
+  - The original compound or a common compound variant may appear in every group
+    whose semantic anchor it genuinely entails.
   - required=false is only supportive ranking/context.
-  - Use natural words or phrases only, never search syntax.
+  - A multiword term is lexical co-occurrence, not an exact phrase: host code
+    requires its analyzed content words but does not require their adjacency or
+    order. Therefore keep multiword terms compact and omit filler words,
+    articles, and prepositions when possible.
+  - Use natural lexical forms only, never backend search syntax.
   - Terms should normally follow retrieval_languages.
-- constraints: reliable constraints such as year, month, date, place, direction,
-  or identifier. Do not guess.
+- constraints: reliable eligibility/retrieval constraints such as year, month,
+  date, place, direction, or identifier. These describe which records qualify;
+  do not put presentation or writing instructions here. Do not guess.
 - verification_requirements: concise criteria for deciding whether a candidate
   really answers the request, written in interaction_language.
+- answer_requirements: concise instructions about how the final answer should be
+  presented, written in interaction_language. Put requested ordering, output
+  shape, requested columns/fields, and verbosity/detail here. Do not turn these
+  presentation instructions into lexical search terms or document constraints.
 
 CONSISTENCY
 - semantic_query is the authoritative statement of the chosen interpretation.
-- concepts, concept_groups, constraints, and verification_requirements must
-  express that same interpretation.
-- Alternatives inside one concept_group must be lexical variants of the same
-  criterion, not merely related topics and not competing meanings.
+- concepts, concept_groups, constraints, verification_requirements, and
+  answer_requirements must express that same user request without changing it.
+- Alternatives inside one concept_group must express the same semantic anchor,
+  not merely related topics and not competing meanings.
+- Do not force a source document to reproduce the same compound or natural-
+  language phrase as the user when the meaning can be expressed by separate
+  lexical anchors.
 - If a short request has several meanings, choose the most likely one and keep
   discarded plausible meanings only in alternative_interpretations.
 - For a request consisting essentially of one concrete entity name, perform a
@@ -137,8 +176,10 @@ LEXICAL GUARDRAILS
   contain.
 - Prefer a few strong alternatives over creative or remotely related terms.
 - Preserve explicitly named normal subject terms in the relevant concept group.
-- A highly probable typo correction or normalization may be added to the same
-  OR group, but the original must remain and the transformation must be recorded.
+- For a highly probable typo, record the transformation in term_interpretations.
+  The corrected form may be the primary term. The original form may be retained
+  as an expansion term unless the user explicitly requested literal preservation.
+  Do not invent further morphological interpretations of an unfamiliar word.
 - Names, organizations, domains, brands, identifiers, and case numbers are not
   free spelling exercises. Do not rename them based on general plausibility.
 - Do not transliterate Unicode characters on your own.
@@ -155,7 +196,8 @@ retrieval_languages=["de"], interaction_language="de":
      concepts=["Lebenslauf"],
      concept_groups=[
        {"required":true,
-        "terms":["Lebenslauf","CV","beruflicher Werdegang"]}
+        "primary_terms":["Lebenslauf"],
+        "expansion_terms":["CV","beruflicher Werdegang"]}
      ].
   "CV" is acceptable because it is a common abbreviation in German documents.
 
@@ -165,7 +207,8 @@ retrieval_languages=["de"], interaction_language="de":
      concepts=["Geschäftsführer"],
      concept_groups=[
        {"required":true,
-        "terms":["Geschäftsführer","Geschäftsführung","geschäftsführender Gesellschafter"]}
+        "primary_terms":["Geschäftsführer"],
+        "expansion_terms":["Geschäftsführung","geschäftsführender Gesellschafter"]}
      ].
 
 - "Erika Beispiel Geburtstag"
@@ -174,9 +217,53 @@ retrieval_languages=["de"], interaction_language="de":
      entities=["Erika Beispiel"],
      concepts=["Geburtsdatum"],
      concept_groups=[
-       {"required":true,"terms":["Geburtsdatum","geboren","geb."]}
+       {"required":true,"primary_terms":["Geburtsdatum"],"expansion_terms":["geboren","geb."]}
      ].
   Do not mix in "Feier" or "Einladung"; those represent a different meaning.
+
+- "Leon Schmid Autokauf"
+  -> decompose the compound into independently mandatory semantic anchors:
+     entities=["Leon Schmid"],
+     concepts=["Kauf","Kraftfahrzeug"],
+     concept_groups=[
+       {"required":true,
+        "primary_terms":["Autokauf"],
+        "expansion_terms":["Autokaufvertrag","Fahrzeugkauf","Kauf","Erwerb","Kaufvertrag","gekauft","erworben"]},
+       {"required":true,
+        "primary_terms":["Autokauf"],
+        "expansion_terms":["Autokaufvertrag","Fahrzeugkauf","Auto","Kfz","Kraftfahrzeug","Fahrzeug","Pkw"]}
+     ].
+  Do not invent a prose phrase such as "Kaufvertrag für ein Auto" merely to
+  combine both anchors; separate required groups already express the conjunction.
+
+- "Suche Rechnungen der Eboracum aus 2020 und liste sie geordnet nach Datum absteigend"
+  -> semantic_query="Suche Rechnungen der Eboracum aus 2020.",
+     entities=["Eboracum"],
+     concepts=["Rechnung"],
+     concept_groups=[
+       {"required":true,
+        "primary_terms":["Rechnungen","Rechnung"],
+        "expansion_terms":["Rechnungsnummer","Invoice"]}
+     ],
+     constraints=[
+       {"kind":"year","value":"2020"}
+     ],
+     verification_requirements=[
+       "Der Treffer muss eine Rechnung der Eboracum aus dem Jahr 2020 sein."
+     ],
+     answer_requirements=[
+       "Liste die passenden Rechnungen nach Datum absteigend."
+     ].
+  "2020" is a qualifying constraint, not a concept or merely a ranking term.
+  "nach Datum absteigend" is an answer requirement, not search content.
+
+- "Suche Rachnungen der Eboracum"
+  -> if "Rachnungen" is judged a highly probable typo for "Rechnungen", record
+     term_interpretations=[{"original":"Rachnungen","status":"probable_typo",
+     "alternatives":["Rechnungen"]}] and use "Rechnungen" as the primary term.
+     Do not invent a hypothetical singular "Rachnung" or other morphology.
+  A user who needs the unusual spelling literally can write "Rachnungen" in
+  double quotes; host code then requires that literal wording.
 
 retrieval_languages=["de"], interaction_language="en":
 - "Who is the managing director of Example Real Estate GmbH?"
@@ -199,12 +286,17 @@ Check:
 2. Does every term_interpretations.original occur exactly in the user text?
 3. Did you avoid emitting preserved for unchanged wording unless the user
    explicitly requested preservation?
-4. Is every correction/normalization explicit and is the original preserved?
+4. Is every correction/normalization explicit and is the original preserved in term_interpretations for transparency?
 5. Did an explicitly preserved spelling remain preserved?
-6. Do semantic_query, concepts, concept_groups, constraints, and
-   verification_requirements describe one consistent interpretation?
-7. Are user-facing semantic fields in interaction_language and lexical terms
+6. Do semantic_query, concepts, concept_groups, constraints,
+   verification_requirements, and answer_requirements describe one consistent
+   interpretation, with primary terms separated from recall expansions?
+7. Did you keep presentation requests such as sorting, table/list shape, or
+   requested detail out of lexical retrieval terms and constraints?
+8. Are user-facing semantic fields in interaction_language and lexical terms
    appropriate for retrieval_languages?
+9. Did you split compound concepts into separate required groups when several
+   semantic components must independently be present?
 
 Output only the requested JSON object.
 PROMPT;
@@ -239,7 +331,7 @@ PROMPT;
         try {
             $payload = json_encode(
                 [
-                    'query' => $query,
+                    'original_request' => $query,
                     'interaction_language' => $this->interactionLanguage(),
                     'retrieval_languages' => $this->config->getRetrievalLanguages(),
                 ],

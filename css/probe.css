@@ -100,6 +100,10 @@
     fill: currentColor;
 }
 
+.sunaqfind-card[hidden] {
+    display: none !important;
+}
+
 .sunaqfind-card {
     margin: 16px 0;
     padding: 20px 22px;

@@ -177,6 +177,26 @@ namespace {
         }
     }
 
+    final class LengthLimitedClientService implements IClientService {
+        public function newClient(): object {
+            return new class {
+                public function post(string $url, array $options): object {
+                    return new class {
+                        public function getStatusCode(): int { return 200; }
+                        public function getBody(): string {
+                            return json_encode([
+                                'choices' => [[
+                                    'finish_reason' => 'length',
+                                    'message' => ['content' => null],
+                                ]],
+                            ], JSON_THROW_ON_ERROR);
+                        }
+                    };
+                }
+            };
+        }
+    }
+
     class FakeAclValidator extends AclValidator {
         public function __construct() {}
 
@@ -389,6 +409,24 @@ namespace {
     };
 
 
+    $tests['admin LLM connection test uses ordinary Ollama-compatible request mode'] = function (): void {
+        $http = new CapturingClientService();
+        $client = new LlmClient(
+            $http,
+            new FakeLlmConfigService('http://ollama.invalid:11434/v1', 'qwen3:8b')
+        );
+
+        $result = $client->testConnection();
+
+        check($result['ok'] === true, 'Ollama-compatible LLM test did not report success');
+        check(count($http->calls) === 1, 'Ollama-compatible LLM test did not use exactly one request');
+        $body = $http->calls[0]['body'];
+        check(($body['max_tokens'] ?? null) === 1400, 'LLM connection test does not use the normal search token budget');
+        check(!array_key_exists('think', $body), 'LLM connection test still forces Ollama think mode');
+        check(!array_key_exists('reasoning_effort', $body), 'LLM connection test unexpectedly forces reasoning_effort');
+        check(($http->calls[0]['options']['timeout'] ?? null) === 60, 'LLM connection test timeout changed');
+    };
+
     $tests['LLM HTTP 429 is classified as rate or quota failure'] = function (): void {
         $client = new LlmClient(
             new StatusClientService(429),
@@ -439,6 +477,34 @@ namespace {
         check(str_contains((string)$serialized, '"groups":"finance"'), 'Group prefilter clause missing');
         check(!str_contains((string)$serialized, '.keyword'), 'ACL prefilter still depends on post-NC23 .keyword subfields');
         check(!str_contains((string)$serialized, '"match"'), 'ACL prefilter must not use analyzed match clauses');
+    };
+
+    $tests['ACL-prefiltered search carries Elasticsearch total hits safely'] = function (): void {
+        $client = new SequenceClientService([[
+            'hits' => [
+                'total' => ['value' => 137, 'relation' => 'eq'],
+                'hits' => [[
+                    '_id' => 'files:2',
+                    '_score' => 10.0,
+                    '_source' => ['file_id' => 2],
+                    'highlight' => ['content' => ['visible content']],
+                ]],
+            ],
+        ]]);
+        $search = new ElasticsearchSearch(
+            $client,
+            new FakeConfigService(),
+            new PrefilterAclValidator([2]),
+            new ElasticsearchCompiler()
+        );
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec((new SearchSpecNormalizer())->fallback('Leon Schmid'), 'Leon Schmid', true);
+
+        $result = $search->search($plan, 'Leon Schmid', 15);
+
+        check(($result['total_matches'] ?? null) === 137, 'ACL-prefiltered Elasticsearch total hits were not retained');
+        check(($result['total_matches_relation'] ?? '') === 'eq', 'Elasticsearch total-hit relation was not retained');
+        check(($client->calls[0]['body']['track_total_hits'] ?? null) === true, 'Search request does not ask Elasticsearch for total hits');
     };
 
     $tests['empty valid ACL metadata prefilter result stays empty'] = function (): void {
@@ -635,7 +701,7 @@ namespace {
         check(is_string($rewriter) && is_string($answerer), 'Prompt sources could not be read');
         check(str_contains($rewriter, "'interaction_language' => \$this->interactionLanguage()"), 'Planner does not receive interaction language');
         check(str_contains($rewriter, 'retrieval_languages'), 'Planner lost independent retrieval languages');
-        check(str_contains($answerer, 'Write the answer in INTERACTION_LANGUAGE'), 'Answer prompt is not interaction-language aware');
+        check(str_contains($answerer, 'Write the answer in the language of ORIGINAL_USER_REQUEST_JSON'), 'Answer prompt is not original-request-language aware');
         check(!str_contains($answerer, 'auf Deutsch'), 'Answer prompt still hard-codes German');
         check(str_contains($rewriter, 'Do not emit preserved merely because an ordinary term or entity remains'), 'Planner still allows spurious preserved notices');
         check(str_contains($answerer, 'prefer a compact Markdown table'), 'Answer prompt lost structured presentation guidance');
@@ -644,6 +710,14 @@ namespace {
         check(str_contains((string)$admin, "\$l->t('Connection tests use the currently saved configuration. Save changes before testing.')"), 'Admin template is not localized');
         check(str_contains((string)$searchJs, "t('sunaqfind', 'Searching …')"), 'Search JavaScript is not localized');
         check(is_array($de) && (($de['translations']['Search'] ?? '') === 'Suchen'), 'German translation catalog is missing core UI strings');
+        check(
+            (($de['translations']['Evaluation limits prevented all retrieved documents from being considered. If possible, describe the information you are looking for more precisely to narrow the result set.'] ?? '') !== ''),
+            'German translation for evaluation limit notice is missing'
+        );
+        check(
+            (($de['translations']['This search found substantially more matching documents than can be considered in one run. If possible, describe the information you are looking for more precisely to narrow the result set.'] ?? '') !== ''),
+            'German translation for retrieval horizon notice is missing'
+        );
         check(
             (($de['translations']['“%s” was understood as a spelling or naming variant; also considered: “%s”.'] ?? '') !== ''),
             'German translation for normalization search notes is missing'
@@ -844,8 +918,10 @@ namespace {
         check(str_contains($script, 'searchDocumentLimit'), 'Elasticsearch hit limit is not saved');
         check(str_contains($script, 'llmDocumentLimit'), 'AI document limit is not saved');
         check(str_contains($config, "boolValue('acl_prefilter_enabled', true)"), 'ACL prefilter does not default on');
-        check(str_contains($config, "intValue('search_document_limit', 15, 1, 20)"), 'Elasticsearch hit limit does not default to 15');
-        check(str_contains($config, "intValue('llm_document_limit', 12, 1, 20)"), 'AI document limit does not default to 12');
+        check(str_contains($config, "intValue('search_document_limit', 15, 1, 100)"), 'Elasticsearch hit limit does not default to 15 with a 100-hit ceiling');
+        check(str_contains($template, 'id="sunaqfind-search-document-limit" type="number" min="1" max="100"'), 'Admin UI does not allow an Elasticsearch horizon up to 100');
+        check(str_contains($config, "intValue('llm_document_limit', 12, 1, 25)"), 'AI document limit does not default to 12 with a 25-document ceiling');
+        check(str_contains($template, 'id="sunaqfind-llm-document-limit" type="number" min="1" max="25"'), 'Admin UI does not allow AI evaluation up to 25 documents');
         check(!str_contains($search, 'candidateBudget'), 'Elasticsearch search still contains automatic overfetch logic');
     };
 
@@ -875,9 +951,28 @@ namespace {
             'entities' => ['Beispielmuseum'],
             'concept_groups' => [[
                 'required' => true,
+                'primary_terms' => ['Umsatz'],
+                'expansion_terms' => ['Einnahmen'],
                 'terms' => ['Umsatz', 'Einnahmen'],
             ]],
+            'primary_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Beispielmuseum']],
+                ['required' => true, 'kind' => 'concept:primary', 'terms' => ['Umsatz']],
+            ],
+            'expanded_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Beispielmuseum']],
+                ['required' => true, 'kind' => 'concept:expanded', 'terms' => ['Umsatz', 'Einnahmen']],
+            ],
+            'retrieval_stages' => [
+                ['stage' => 'primary', 'executed' => true, 'authorized_added' => 4],
+                ['stage' => 'expanded', 'executed' => true, 'reason' => 'primary_below_target', 'authorized_added' => 2],
+            ],
+            'search_mode' => 'search_spec',
             'verification_requirements' => ['Treffer enthält belastbare Umsatzangaben.'],
+            'applied_constraints' => [[
+                'kind' => 'year',
+                'value' => '2020',
+            ]],
             'alternative_interpretations' => [],
             'term_interpretations' => [],
             'required_literals' => [],
@@ -890,8 +985,48 @@ namespace {
         check(!str_contains($guidance, 'Search terms used'), 'Search terms still leak into normal guidance');
         check(!str_contains($guidance, 'Evidence was considered sufficient when'), 'Evidence criterion still leaks into normal guidance');
         check(str_contains($guidance, 'Different wording can lead'), 'General query variation guidance was lost');
-        check(str_contains($strategy, 'Beispielmuseum + (Umsatz | Einnahmen)'), 'Search terms missing from separate strategy');
+        check(str_contains($strategy, 'Primary search: Beispielmuseum + Umsatz'), 'Primary search missing from separate strategy');
+        check(str_contains($strategy, 'Expanded search: Beispielmuseum + (Umsatz | Einnahmen)'), 'Expanded search missing from separate strategy');
+        check(str_contains($strategy, '2 additional authorized documents were added'), 'Expansion execution result missing from strategy');
+        check(str_contains($strategy, 'Search constraints used: year 2020'), 'Applied year constraint missing from separate strategy');
         check(str_contains($strategy, 'Evidence was considered sufficient when'), 'Evidence criterion missing from separate strategy');
+    };
+
+    $tests['evaluation limit notice appears only for material truncation'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'evaluationLimitNotice');
+        $method->setAccessible(true);
+
+        $notice = $method->invoke($service, 15, 12);
+        check(str_contains($notice, 'Evaluation limits prevented all retrieved documents'), 'Default 15/12 truncation did not produce a notice');
+
+        check($method->invoke($service, 13, 12) === '', 'Single omitted document produced an unnecessary truncation notice');
+        check($method->invoke($service, 12, 12) === '', 'Complete evaluation incorrectly produced a truncation notice');
+        check($method->invoke($service, 6, 4) !== '', 'Material relative truncation did not produce a notice');
+    };
+
+    $tests['retrieval horizon notice requires materially more ACL-prefiltered matches'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'retrievalLimitNotice');
+        $method->setAccessible(true);
+
+        $notice = $method->invoke($service, 30, 15, true);
+        check(str_contains($notice, 'substantially more matching documents'), '30/15 ACL-prefiltered matches did not produce a retrieval notice');
+
+        check($method->invoke($service, 22, 15, true) === '', 'Small excess above retrieval limit produced an unnecessary notice');
+        check($method->invoke($service, 30, 15, false) === '', 'Retrieval notice ignored missing ACL prefilter');
+        check($method->invoke($service, null, 15, true) === '', 'Unknown total matches produced a retrieval notice');
+    };
+
+    $tests['analysis diagnostics expose evaluation truncation counts'] = function () use ($root): void {
+        $source = file_get_contents($root . '/lib/Service/SearchService.php');
+        check(is_string($source), 'SearchService source could not be read');
+        check(str_contains($source, "'total_matches' => \$totalMatches"), 'Analysis diagnostics lost ACL-prefiltered total match count');
+        check(str_contains($source, "'retrieval_limit' => \$retrievalLimit"), 'Analysis diagnostics lost retrieval limit');
+        check(str_contains($source, "'retrieval_truncated' => \$retrievalLimitNotice !== ''"), 'Analysis diagnostics lost retrieval truncation flag');
+        check(str_contains($source, "'retrieved_for_evaluation' => \$retrievedForEvaluation"), 'Analysis diagnostics lost retrieved-for-evaluation count');
+        check(str_contains($source, "'evaluated_document_count' => \$evaluatedDocuments"), 'Analysis diagnostics lost evaluated-document count');
+        check(str_contains($source, "'evaluation_truncated' => \$evaluationLimitNotice !== ''"), 'Analysis diagnostics lost evaluation truncation flag');
     };
 
     $tests['planner reasoning experiment maps explicit modes'] = function (): void {
@@ -987,6 +1122,9 @@ namespace {
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'CONSISTENCY'), 'Interpretation consistency contract missing from planner prompt');
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'Erika Beispiel Geburtstag'), 'Birthday interpretation regression example missing from planner prompt');
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'Feier'), 'Birthday celebration contrast example missing from planner prompt');
+        check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'Leon Schmid Autokauf'), 'Compositional anchor example missing from planner prompt');
+        check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'separate required groups'), 'Planner prompt does not require decomposition of compound concepts');
+        check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'multiword term is lexical co-occurrence'), 'Planner prompt does not explain multiword lexical term semantics');
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'alternative_interpretations'), 'Alternative interpretation UI contract missing from planner prompt');
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'actual search request'), 'Search-content distinction missing from planner prompt');
         check(str_contains((string)$llm->calls[0]['messages'][0]['content'], 'instructions about how the request must be interpreted'), 'User-directive distinction missing from planner prompt');
@@ -1178,6 +1316,7 @@ namespace {
         check(($plan['required_literals'] ?? []) === ['Gebirtstag'], 'Quoted literal was not extracted');
         $rendered = json_encode((new ElasticsearchCompiler())->compile($plan, $query), JSON_UNESCAPED_UNICODE);
         check(str_contains((string)$rendered, 'match_phrase'), 'Quoted literal was not compiled as a phrase');
+        check(!str_contains((string)$rendered, '"query":"Gebirtstag","operator":"and"'), 'Quoted literal was incorrectly downgraded to an analyzed conjunction');
         check(str_contains((string)$rendered, 'Gebirtstag'), 'Quoted literal is missing from compiled query');
         check(str_contains((string)$rendered, 'Geburtsdatum'), 'Semantic expansion was incorrectly disabled by quoting');
     };
@@ -1271,6 +1410,55 @@ namespace {
         $must = json_encode($body['query']['bool']['must'], JSON_UNESCAPED_UNICODE);
         check(str_contains((string)$must, 'Erika Beispiel'), 'Entity is absent from compiler output');
         check(str_contains((string)$must, 'Curriculum Vitae'), 'Concept alternative is absent');
+        check(substr_count((string)$must, '"operator":"and"') >= 2, 'Multiword entity/concept terms are not compiled conjunctively');
+        check(!str_contains((string)$must, 'match_phrase_prefix":{"content":"Erika Beispiel"'), 'Multiword entity is still compiled as a phrase prefix');
+    };
+
+    $tests['compositional vehicle purchase query compiles separate required anchors'] = function (): void {
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => 'Autokauf von Leon Schmid',
+            'entities' => ['Leon Schmid'],
+            'concepts' => ['Kauf', 'Kraftfahrzeug'],
+            'concept_groups' => [
+                [
+                    'required' => true,
+                    'terms' => ['Kauf', 'Erwerb', 'Kaufvertrag', 'Autokauf'],
+                ],
+                [
+                    'required' => true,
+                    'terms' => ['Auto', 'Kfz', 'Kraftfahrzeug', 'Fahrzeug', 'Autokauf'],
+                ],
+            ],
+        ], 'Leon Schmid Autokauf');
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, 'Leon Schmid Autokauf');
+        $body = (new ElasticsearchCompiler())->compile($plan, 'Leon Schmid Autokauf');
+
+        check(count($body['query']['bool']['must']) === 3, 'Entity plus two required concept anchors did not become three MUST clauses');
+        $must = json_encode($body['query']['bool']['must'], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$must, 'Leon Schmid'), 'Vehicle-purchase entity anchor is missing');
+        check(str_contains((string)$must, 'Kaufvertrag'), 'Purchase anchor is missing');
+        check(str_contains((string)$must, 'Kraftfahrzeug'), 'Vehicle anchor is missing');
+    };
+
+    $tests['unquoted multiword lexical term requires all analyzed terms'] = function (): void {
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => 'Kaufvertrag Auto',
+            'concepts' => ['Kaufvertrag Auto'],
+            'concept_groups' => [[
+                'required' => true,
+                'terms' => ['Kaufvertrag Auto'],
+            ]],
+        ], 'Kaufvertrag Auto');
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, 'Kaufvertrag Auto');
+        $body = (new ElasticsearchCompiler())->compile($plan, 'Kaufvertrag Auto');
+        $must = json_encode($body['query']['bool']['must'], JSON_UNESCAPED_UNICODE);
+
+        check(str_contains((string)$must, '"query":"Kaufvertrag Auto","operator":"and"'), 'Multiword lexical term is not compiled as an analyzed conjunction');
+        check(!str_contains((string)$must, 'match_phrase'), 'Unquoted multiword term was incorrectly compiled as a phrase');
     };
 
     $tests['raw LLM Elasticsearch DSL cannot pass SearchSpec boundary'] = function (): void {
@@ -1392,7 +1580,7 @@ namespace {
             ['authorized' => false, 'file_id' => 1, 'name' => 'denied.pdf', 'snippet' => 'secret'],
             ['authorized' => true, 'file_id' => 2, 'name' => 'allowed.pdf', 'path' => '/allowed.pdf', 'snippet' => 'visible'],
         ]);
-        $llm = new FakeLlmClient('{"answer_found":false,"answer":"Keine belastbare Antwort [1]","entity_interpretations":[{"query_entity":"Erika","interpreted_as":"Erika Beispiel","citations":[1]}]}');
+        $llm = new FakeLlmClient('{"answer_found":false,"answer":"Keine belastbare Antwort [[file-2]]","citation_explanations":[{"evidence_id":"file-2","explanation":"Evidence record file-2 contains the school information used by this statement."}],"entity_interpretations":[{"query_entity":"Erika","interpreted_as":"Erika Beispiel","evidence_ids":["file-2"]}]}');
         $assessment = (new AnswerService($llm))->answerWithAssessment('Frage?', $evidence['json'], [
             'semantic_query' => 'Welche Schule wurde besucht?',
             'entities' => ['Erika'],
@@ -1402,40 +1590,51 @@ namespace {
         $call = $llm->calls[0];
         $serialized = json_encode($call['messages'], JSON_UNESCAPED_UNICODE);
 
-        check($assessment['answer'] === 'Keine belastbare Antwort [1]', 'Answer was changed');
+        check($assessment['answer'] === 'Keine belastbare Antwort [[file-2]]', 'Answer was changed');
         check($assessment['answer_found'] === false, 'Negative answer assessment was lost');
+        check(($assessment['citation_explanations'][0]['evidence_id'] ?? '') === 'file-2', 'Citation explanation evidence ID was lost');
+        check(str_contains((string)($assessment['citation_explanations'][0]['explanation'] ?? ''), 'school information'), 'Citation explanation text was lost');
         check(($assessment['entity_interpretations'][0]['interpreted_as'] ?? '') === 'Erika Beispiel', 'Evidence-based entity interpretation was lost');
-        check(($assessment['entity_interpretations'][0]['citations'] ?? []) === [1], 'Entity interpretation citations were lost');
+        check(($assessment['entity_interpretations'][0]['evidence_ids'] ?? []) === ['file-2'], 'Entity interpretation evidence IDs were lost');
         check($call['timeout'] === 90, 'Answer timeout is not 90 seconds');
         check($call['json_mode'] === true, 'Answer assessment is not requested as JSON');
+        check($call['think'] === false, 'Answer synthesis still allows provider reasoning by default');
+        check($call['reasoning_mode'] === 'none', 'Answer synthesis does not request reasoning_effort=none');
         check(str_contains((string)$call['messages'][0]['content'], AnswerService::UNTRUSTED_EVIDENCE_GUARD), 'Evidence guard missing');
         check(str_contains((string)$serialized, 'allowed.pdf'), 'Authorized evidence missing');
         check(!str_contains((string)$serialized, 'denied.pdf'), 'Denied evidence reached answerer');
         check(!str_contains((string)$serialized, 'secret'), 'Denied snippet reached answerer');
         check(str_contains((string)$serialized, 'SEARCH_CONTEXT_JSON'), 'Search context envelope missing');
-        check(str_contains((string)$serialized, 'INTERACTION_LANGUAGE: en'), 'Answerer did not receive interaction language');
+        check(!str_contains((string)$serialized, 'UI_LANGUAGE:'), 'Answerer still receives UI language');
+        check(str_contains((string)$serialized, 'ORIGINAL_USER_REQUEST_JSON'), 'Answerer did not receive original request');
+        $userMessage = (string)$call['messages'][1]['content'];
+        check(strrpos($userMessage, 'ORIGINAL_USER_REQUEST_JSON') > strrpos($userMessage, 'EVIDENCE_JSON'), 'Original request is not the final answer payload section');
+        check(str_contains((string)$call['messages'][0]['content'], 'language of ORIGINAL_USER_REQUEST_JSON'), 'Answerer is not instructed to follow the original request language');
         check(str_contains((string)$serialized, 'Schulbildung'), 'Search context did not reach answerer');
+        check(str_contains((string)$call['messages'][0]['content'], 'For every evidence marker used in "answer"'), 'Answer prompt does not request citation explanations');
+        check(str_contains((string)$call['messages'][0]['content'], '"citation_explanations"'), 'Answer JSON contract does not expose citation_explanations');
     };
 
     $tests['answerer accepts fully fenced JSON fallback responses'] = function (): void {
-        $llm = new FakeLlmClient("```json\n{\"answer_found\":true,\"answer\":\"Antwort [1]\",\"entity_interpretations\":[]}\n```");
+        $llm = new FakeLlmClient("```json\n{\"answer_found\":true,\"answer\":\"Antwort [[file-1]]\",\"citation_explanations\":[],\"entity_interpretations\":[]}\n```");
         $assessment = (new AnswerService($llm))->answerWithAssessment('Frage?', '{"records":[]}');
 
         check($assessment['answer_found'] === true, 'Fenced JSON answer lost answer_found');
-        check($assessment['answer'] === 'Antwort [1]', 'Fenced JSON answer text was not decoded');
+        check($assessment['answer'] === 'Antwort [[file-1]]', 'Fenced JSON answer text was not decoded');
     };
 
     $tests['answerer drops entity interpretations not present in search context'] = function (): void {
         $evidence = (new EvidenceBuilder())->build([
             ['authorized' => true, 'file_id' => 2, 'name' => 'rumford.pdf', 'path' => '/rumford.pdf', 'snippet' => 'Example Real Estate GmbH; Max Beispiel Geschäftsführer'],
         ]);
-        $llm = new FakeLlmClient('{"answer_found":true,"answer":"Example Real Estate GmbH [1]","entity_interpretations":[{"query_entity":"Example Real Estate GmbH","interpreted_as":"Gesellschaft mit Sitz in München","citations":[1]},{"query_entity":"Max Beispiel","interpreted_as":"Geschäftsführer","citations":[1]}]}');
+        $llm = new FakeLlmClient('{"answer_found":true,"answer":"Example Real Estate GmbH [[file-2]]","citation_explanations":[],"entity_interpretations":[{"query_entity":"Example Real Estate GmbH","interpreted_as":"Gesellschaft mit Sitz in München","evidence_ids":["file-2"]},{"query_entity":"Max Beispiel","interpreted_as":"Geschäftsführer","evidence_ids":["file-2"]}]}');
         $assessment = (new AnswerService($llm))->answerWithAssessment('Example Real Estate GmbH', $evidence['json'], [
             'entities' => ['Example Real Estate GmbH'],
         ]);
 
         check(count($assessment['entity_interpretations']) === 1, 'Non-query entity interpretation was not removed');
         check(($assessment['entity_interpretations'][0]['query_entity'] ?? '') === 'Example Real Estate GmbH', 'Allowed query entity interpretation was lost');
+        check(($assessment['entity_interpretations'][0]['evidence_ids'] ?? []) === ['file-2'], 'Allowed entity evidence IDs were lost');
         $prompt = (string)$llm->calls[0]['messages'][0]['content'];
         check(str_contains($prompt, 'Use hedging'), 'Direct-evidence wording guardrail missing');
         check(str_contains($prompt, 'name similarity'), 'Entity-only anti-speculation guardrail missing');
@@ -1696,6 +1895,57 @@ namespace {
         );
     };
 
+    $tests['analysis evidence preserves source indices and stable evidence IDs'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'analysisEvidence');
+        $method->setAccessible(true);
+
+        $evidence = $method->invoke($service, [
+            [
+                'source_index' => 1,
+                'evidence_id' => 'file-101',
+                'file_id' => 101,
+                'name' => 'mail.txt',
+                'path' => '/Mail/mail.txt',
+                'snippet' => 'Medical correspondence unrelated to a vehicle purchase.',
+            ],
+            [
+                'source_index' => 11,
+                'evidence_id' => 'file-202',
+                'file_id' => 202,
+                'name' => 'rechnung-audi.pdf',
+                'path' => '/Belege/rechnung-audi.pdf',
+                'snippet' => 'Audi A5 Kauf Dezember 2020.',
+            ],
+        ]);
+
+        check(count($evidence) === 2, 'Analysis evidence mapping dropped answerer records');
+        check(($evidence[0]['index'] ?? 0) === 1, 'Source index 1 was not preserved');
+        check(($evidence[0]['evidence_id'] ?? '') === 'file-101', 'Evidence ID file-101 was lost');
+        check(($evidence[0]['citation'] ?? '') === '[1]', 'Visible citation [1] was not derived');
+        check(($evidence[1]['index'] ?? 0) === 11, 'Source index 11 was not preserved');
+        check(($evidence[1]['evidence_id'] ?? '') === 'file-202', 'Evidence ID file-202 was lost');
+        check(($evidence[1]['citation'] ?? '') === '[11]', 'Visible citation [11] was not derived');
+    };
+
+    $tests['stable evidence markers map deterministically to visible citations'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'normalizeEvidenceCitations');
+        $method->setAccessible(true);
+
+        [$answer, $cited] = $method->invoke(
+            $service,
+            'Audi A5 [[file-8430]] und Vollmacht [[file-4000]].',
+            [
+                ['index' => 11, 'evidence_id' => 'file-8430'],
+                ['index' => 4, 'evidence_id' => 'file-4000'],
+            ]
+        );
+
+        check($answer === 'Audi A5 [11] und Vollmacht [4].', 'Stable evidence markers were not mapped to visible citations');
+        check($cited === [4, 11], 'Mapped citation indices are wrong');
+    };
+
     $tests['analysis mode result exposes sanitized answer error detail only behind analysis gate'] = function () use ($root): void {
         $source = file_get_contents($root . '/lib/Service/SearchService.php');
         check(is_string($source), 'SearchService source could not be read');
@@ -1744,9 +1994,31 @@ namespace {
         check(($deduped[1]['file_id'] ?? 0) === 3, 'Non-duplicate hit was removed');
     };
 
-    $tests['analysis UI renders sanitized answer error detail when present'] = function () use ($root): void {
+    $tests['analysis markup is rendered only when analysis mode is enabled'] = function () use ($root): void {
+        $controller = file_get_contents($root . '/lib/Controller/PageController.php');
+        $template = file_get_contents($root . '/templates/main.php');
+        check(is_string($controller) && is_string($template), 'Analysis rendering sources could not be read');
+        check(
+            str_contains($controller, "'analysis_mode' => \$this->config->isAnalysisMode()"),
+            'Page controller does not pass server-side analysis mode to the template'
+        );
+        check(
+            str_contains($template, "if (!empty(\$_['analysis_mode']))"),
+            'Analysis markup is no longer gated by server-side template rendering'
+        );
+        check(
+            str_contains($template, "script('sunaqfind', 'variance-test');"),
+            'Variance test script is missing from enabled analysis mode'
+        );
+    };
+
+    $tests['analysis UI renders answer evidence and sanitized error detail when present'] = function () use ($root): void {
         $script = file_get_contents($root . '/js/search.js');
         check(is_string($script), 'search.js could not be read');
+        check(
+            str_contains($script, 'answer_evidence: result.answer_evidence || []'),
+            'Analysis UI drops the exact evidence mapping sent to the answerer'
+        );
         check(
             str_contains($script, 'if (result.answer_error_detail)'),
             'Analysis UI does not gate rendering of answer_error_detail'
@@ -1853,6 +2125,683 @@ namespace {
         $pagePos = strpos($template, 'id="sunaqfind-probe"');
         check($containerPos !== false && $pagePos !== false && $containerPos < $pagePos, 'Page content is not inside #app-content');
         check(str_contains($template, "</main>\n</div>"), '#app-content does not close around the page content');
+    };
+
+
+    $tests['request routing separates constraints verification and answer requirements'] = function (): void {
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => 'Suche Rechnungen der Eboracum aus 2020.',
+            'entities' => ['Eboracum'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'terms' => ['Rechnung', 'Invoice'],
+            ]],
+            'constraints' => [[
+                'kind' => 'year',
+                'value' => '2020',
+            ]],
+            'verification_requirements' => [
+                'Der Treffer muss eine Rechnung der Eboracum aus dem Jahr 2020 sein.',
+            ],
+            'answer_requirements' => [
+                'Liste die passenden Rechnungen nach Datum absteigend.',
+            ],
+        ], 'Suche Rechnungen der Eboracum aus 2020 und liste sie geordnet nach Datum absteigend');
+
+        check(($spec['constraints'][0]['kind'] ?? '') === 'year', 'Year constraint kind was lost');
+        check(($spec['constraints'][0]['value'] ?? '') === '2020', 'Year constraint value was lost');
+        check(
+            ($spec['verification_requirements'][0] ?? '') === 'Der Treffer muss eine Rechnung der Eboracum aus dem Jahr 2020 sein.',
+            'Verification requirement was lost'
+        );
+        check(
+            ($spec['answer_requirements'][0] ?? '') === 'Liste die passenden Rechnungen nach Datum absteigend.',
+            'Answer requirement was lost'
+        );
+    };
+
+    $tests['planner prompt keeps original request and invoice year example explicit'] = function (): void {
+        $llm = new FakeLlmClient(json_encode([
+            'retrieval_intent' => 'planned_semantic',
+            'lexical_sufficiency' => 'high',
+            'lexical_query' => 'Rechnungen Eboracum 2020',
+            'semantic_query' => 'Suche Rechnungen der Eboracum aus 2020.',
+            'entities' => ['Eboracum'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'terms' => ['Rechnung', 'Invoice'],
+            ]],
+            'constraints' => [[
+                'kind' => 'year',
+                'value' => '2020',
+            ]],
+            'answer_requirements' => [
+                'Liste die passenden Rechnungen nach Datum absteigend.',
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+
+        $query = 'Suche Rechnungen der Eboracum aus 2020 und liste sie geordnet nach Datum absteigend';
+        $rewriter = new QueryRewriteService($llm, new SearchSpecNormalizer(), new FakeConfigService());
+        $result = $rewriter->rewrite($query);
+
+        check($result['status'] === 'ok', 'Invoice request unexpectedly fell back');
+        check(($result['spec']['constraints'][0]['value'] ?? '') === '2020', 'Planner year constraint was not normalized');
+        check(($result['spec']['answer_requirements'][0] ?? '') !== '', 'Planner answer requirement was not normalized');
+
+        $system = (string)$llm->calls[0]['messages'][0]['content'];
+        $user = (string)$llm->calls[0]['messages'][1]['content'];
+        check(str_contains($system, 'Suche Rechnungen der Eboracum aus 2020'), 'Invoice/year few-shot example is missing');
+        check(str_contains($system, 'answer_requirements'), 'Planner prompt does not define answer requirements');
+        check(str_contains($system, '"2020" is a qualifying constraint'), 'Planner prompt does not distinguish year constraints');
+        check(str_contains($system, '"nach Datum absteigend" is an answer requirement'), 'Planner prompt does not distinguish answer ordering');
+        check(str_contains($user, '"original_request":"' . $query . '"'), 'Original request is not sent explicitly to the planner');
+    };
+
+    $tests['answerer treats original request as authoritative and receives routed requirements'] = function (): void {
+        $llm = new FakeLlmClient('{"answer_found":true,"answer":"Antwort [[file-1]]","citation_explanations":[],"entity_interpretations":[]}');
+        $question = 'Liste Rechnungen nach Datum absteigend und erläutere sie ausführlich.';
+        (new AnswerService($llm))->answerWithAssessment($question, '{"records":[]}', [
+            'constraints' => [['kind' => 'year', 'value' => '2020']],
+            'verification_requirements' => ['Nur belastbar belegte Rechnungen verwenden.'],
+            'answer_requirements' => [
+                'Nach Datum absteigend sortieren.',
+                'Ausführlich erläutern.',
+            ],
+        ]);
+
+        $system = (string)$llm->calls[0]['messages'][0]['content'];
+        $user = (string)$llm->calls[0]['messages'][1]['content'];
+        check(str_contains($system, 'ORIGINAL_USER_REQUEST_JSON is authoritative'), 'Answerer prompt does not make the original request authoritative');
+        check(str_contains($system, 'Apply verification_requirements'), 'Answerer prompt does not apply verification requirements');
+        check(str_contains($system, 'Honor answer_requirements'), 'Answerer prompt does not apply answer requirements');
+        check(str_contains($user, 'ORIGINAL_USER_REQUEST_JSON'), 'Answerer message lacks explicit original-request channel');
+        check(str_contains($user, '"original_request":"' . $question . '"'), 'Answerer did not receive the exact original request');
+        check(str_contains($user, 'Nach Datum absteigend sortieren.'), 'Answer requirement is absent from answer context');
+        check(str_contains($user, 'Nur belastbar belegte Rechnungen verwenden.'), 'Verification requirement is absent from answer context');
+    };
+
+    $tests['direct lexical routing cannot bypass deterministic year constraint'] = function (): void {
+        $query = 'Rechnungen Eboracum 2020';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'retrieval_intent' => 'direct_lexical',
+            'lexical_sufficiency' => 'high',
+            'lexical_query' => $query,
+            'semantic_query' => 'Rechnungen der Eboracum aus 2020',
+            'entities' => ['Eboracum'],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query, false, true);
+        check(($plan['hard_constraints'] ?? []) === ['2020'], 'Direct lexical plan lost the deterministic year constraint');
+
+        $body = (new ElasticsearchCompiler())->compile($plan, $query);
+        $must = json_encode($body['query']['bool']['must'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$must, '2020'), 'Direct lexical compiler did not require the year constraint');
+        check(($body['query']['bool']['minimum_should_match'] ?? 0) === 1, 'Direct lexical query became optional after adding a hard constraint');
+    };
+
+    $tests['search context forwards answer requirements and analysis preserves original request'] = function () use ($root): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'searchContext');
+        $method->setAccessible(true);
+        $context = $method->invoke($service, [
+            'answer_requirements' => ['Ausführlich antworten.'],
+            'verification_requirements' => ['Nur belegte Treffer.'],
+        ]);
+
+        check(($context['answer_requirements'] ?? []) === ['Ausführlich antworten.'], 'Search context drops answer requirements');
+        $source = file_get_contents($root . '/lib/Service/SearchService.php');
+        check(is_string($source), 'SearchService source could not be read');
+        check(str_contains($source, "'original_request' => \$query"), 'Analysis diagnostics do not preserve the original request');
+    };
+
+
+    $tests['structured year constraint is compiled even when only planner-normalized'] = function (): void {
+        $query = 'Suche Rechnungen der Eboracum aus zweitausendzwanzig';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'retrieval_intent' => 'planned_semantic',
+            'lexical_sufficiency' => 'high',
+            'lexical_query' => 'Rechnungen Eboracum',
+            'semantic_query' => 'Suche Rechnungen der Eboracum aus dem Jahr 2020.',
+            'entities' => ['Eboracum'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'terms' => ['Rechnung', 'Rechnungen'],
+            ]],
+            'constraints' => [[
+                'kind' => 'year',
+                'value' => '2020',
+            ]],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query, false, false);
+
+        check(($plan['applied_constraints'][0]['kind'] ?? '') === 'year', 'Structured year constraint was not applied');
+        check(($plan['applied_constraints'][0]['value'] ?? '') === '2020', 'Structured year value was not applied');
+
+        $groups = json_encode($plan['lexical_groups'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$groups, '"kind":"constraint:year"'), 'Year constraint is not represented as a required lexical group');
+        check(str_contains((string)$groups, '"terms":["2020"]'), 'Year constraint lexical value is missing');
+
+        $body = (new ElasticsearchCompiler())->compile($plan, $query);
+        $must = json_encode($body['query']['bool']['must'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$must, '"match_phrase":{"content":"2020"}'), 'Year constraint is not compiled as an exact content requirement');
+        check(str_contains((string)$must, '"match_phrase":{"title":"2020"}'), 'Year constraint is not compiled as an exact title requirement');
+        check(!str_contains((string)$must, '"match_phrase_prefix":{"content":"2020"}'), 'Year constraint is still compiled as a prefix requirement');
+    };
+
+    $tests['invalid structured year is verification-only and not compiled'] = function (): void {
+        $query = 'Rechnungen Eboracum irgendwann';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => $query,
+            'entities' => ['Eboracum'],
+            'constraints' => [[
+                'kind' => 'year',
+                'value' => 'irgendwann',
+            ]],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query);
+
+        check(($plan['applied_constraints'] ?? []) === [], 'Invalid year constraint was compiled');
+        $groups = json_encode($plan['lexical_groups'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(!str_contains((string)$groups, 'irgendwann'), 'Invalid year constraint leaked into lexical groups');
+    };
+
+    $tests['analysis diagnostics expose compiled lexical groups and applied constraints'] = function () use ($root): void {
+        $source = file_get_contents($root . '/lib/Service/SearchService.php');
+        check(is_string($source), 'SearchService source could not be read');
+        check(str_contains($source, "'applied_constraints' => is_array(\$plan['applied_constraints'] ?? null)"), 'Applied constraints are absent from analysis diagnostics');
+        check(str_contains($source, "'lexical_groups' => is_array(\$plan['lexical_groups'] ?? null)"), 'Compiled lexical groups are absent from analysis diagnostics');
+    };
+
+
+    $tests['search strategy renders applied constraints separately from verification'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'searchStrategy');
+        $method->setAccessible(true);
+
+        $strategy = $method->invoke($service, [
+            'entities' => ['Eboracum'],
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnung'],
+                'expansion_terms' => ['Invoice'],
+                'terms' => ['Rechnung', 'Invoice'],
+            ]],
+            'primary_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Eboracum']],
+                ['required' => true, 'kind' => 'concept:primary', 'terms' => ['Rechnung']],
+                ['required' => true, 'kind' => 'constraint:year', 'terms' => ['2020']],
+            ],
+            'expanded_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Eboracum']],
+                ['required' => true, 'kind' => 'concept:expanded', 'terms' => ['Rechnung', 'Invoice']],
+                ['required' => true, 'kind' => 'constraint:year', 'terms' => ['2020']],
+            ],
+            'retrieval_stages' => [
+                ['stage' => 'expanded', 'executed' => false, 'reason' => 'primary_filled_target', 'authorized_added' => 0],
+            ],
+            'search_mode' => 'search_spec',
+            'required_literals' => [],
+            'applied_constraints' => [[
+                'kind' => 'year',
+                'value' => '2020',
+            ]],
+            'verification_requirements' => [
+                'Der Treffer muss eine Rechnung der Eboracum aus dem Jahr 2020 sein.',
+            ],
+        ]);
+
+        check(str_contains($strategy, 'Primary search: Eboracum + Rechnung + 2020'), 'Primary invoice search does not expose the applied year constraint inline');
+        check(str_contains($strategy, 'Expanded search: Eboracum + (Rechnung | Invoice) + 2020'), 'Expanded invoice search does not expose the applied year constraint inline');
+        check(str_contains($strategy, 'Expansion status: not needed'), 'Skipped expansion status missing');
+        check(str_contains($strategy, 'Search constraints used: year 2020'), 'Year constraint is not shown as an applied retrieval constraint');
+        check(str_contains($strategy, 'Evidence was considered sufficient when:'), 'Verification heading missing');
+        check(str_contains($strategy, 'Der Treffer muss eine Rechnung der Eboracum aus dem Jahr 2020 sein.'), 'Verification requirement missing');
+    };
+
+
+    $tests['concept groups preserve primary terms separately from expansions'] = function (): void {
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnung'],
+                'expansion_terms' => ['Rechnungsnummer', 'Invoice'],
+            ]],
+        ], 'Rechnungen');
+
+        $group = $spec['concept_groups'][0] ?? [];
+        check(($group['primary_terms'] ?? []) === ['Rechnung'], 'Primary concept term was lost');
+        check(($group['expansion_terms'] ?? []) === ['Rechnungsnummer', 'Invoice'], 'Expansion terms were lost');
+        check(($group['terms'] ?? []) === ['Rechnung', 'Rechnungsnummer', 'Invoice'], 'Compatibility union was not retained');
+    };
+
+    $tests['planner builds strict primary and broader expanded lexical stages'] = function (): void {
+        $query = 'Suche Rechnungen der Eboracum aus 2020';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => $query,
+            'entities' => ['Eboracum'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnung'],
+                'expansion_terms' => ['Rechnungsnummer', 'Invoice'],
+            ]],
+            'constraints' => [['kind' => 'year', 'value' => '2020']],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query);
+
+        check(($plan['has_expansion'] ?? false) === true, 'Planner did not mark semantic expansion');
+        check(($plan['max_rounds'] ?? 0) === 2, 'Planner did not permit two retrieval stages');
+
+        $primary = json_encode($plan['primary_lexical_groups'] ?? [], JSON_UNESCAPED_UNICODE);
+        $expanded = json_encode($plan['expanded_lexical_groups'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$primary, '"terms":["Rechnung"]'), 'Primary stage lost the original concept');
+        check(!str_contains((string)$primary, 'Invoice'), 'Expansion leaked into primary stage');
+        check(str_contains((string)$expanded, 'Rechnungsnummer'), 'Expanded stage lost a recall term');
+        check(str_contains((string)$expanded, 'Invoice'), 'Expanded stage lost Invoice');
+        check(str_contains((string)$primary, '"terms":["2020"]'), 'Primary stage lost the hard year constraint');
+        check(str_contains((string)$expanded, '"terms":["2020"]'), 'Expanded stage lost the hard year constraint');
+    };
+
+    $tests['staged Elasticsearch retrieval preserves primary hits and only appends expansion hits'] = function (): void {
+        $primaryHits = [[
+            '_id' => 'files:1',
+            '_score' => 10.0,
+            '_source' => ['file_id' => 1],
+            'highlight' => ['content' => ['Eboracum Rechnung 2020 primary']],
+        ]];
+        $expandedHits = [
+            [
+                '_id' => 'files:1',
+                '_score' => 12.0,
+                '_source' => ['file_id' => 1],
+                'highlight' => ['content' => ['duplicate primary']],
+            ],
+            [
+                '_id' => 'files:2',
+                '_score' => 9.0,
+                '_source' => ['file_id' => 2],
+                'highlight' => ['content' => ['Eboracum Invoice 2020 expanded']],
+            ],
+            [
+                '_id' => 'files:3',
+                '_score' => 8.0,
+                '_source' => ['file_id' => 3],
+                'highlight' => ['content' => ['Eboracum Rechnungsnummer 2020 expanded']],
+            ],
+        ];
+
+        $client = new SequenceClientService([
+            ['hits' => ['hits' => $primaryHits, 'total' => ['value' => 1, 'relation' => 'eq']]],
+            ['hits' => ['hits' => $expandedHits, 'total' => ['value' => 3, 'relation' => 'eq']]],
+        ]);
+        $search = new ElasticsearchSearch(
+            $client,
+            new FakeConfigService(),
+            new PrefilterAclValidator([1, 2, 3]),
+            new ElasticsearchCompiler()
+        );
+
+        $query = 'Suche Rechnungen der Eboracum aus 2020';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => $query,
+            'entities' => ['Eboracum'],
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnung'],
+                'expansion_terms' => ['Rechnungsnummer', 'Invoice'],
+            ]],
+            'constraints' => [['kind' => 'year', 'value' => '2020']],
+        ], $query);
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query);
+
+        $result = $search->search($plan, $query, 3);
+
+        check(count($client->calls) === 2, 'Expanded Elasticsearch query was not executed after sparse primary retrieval');
+        check(array_column($result['hits'], 'file_id') === [1, 2, 3], 'Expansion displaced or reordered primary hits');
+        check(array_column($result['hits'], 'retrieval_stage') === ['primary', 'expanded', 'expanded'], 'Authorized hits do not retain their retrieval stage');
+        check(($result['retrieval_stages'][0]['authorized_added'] ?? -1) === 1, 'Primary stage accounting is wrong');
+        check(($result['retrieval_stages'][1]['authorized_added'] ?? -1) === 2, 'Expanded stage did not append the missing documents');
+
+        $primaryBody = json_encode($result['retrieval_stages'][0]['query_body'] ?? [], JSON_UNESCAPED_UNICODE);
+        $expandedBody = json_encode($result['retrieval_stages'][1]['query_body'] ?? [], JSON_UNESCAPED_UNICODE);
+        check(str_contains((string)$primaryBody, 'Rechnung'), 'Primary ES query lost Rechnung');
+        check(!str_contains((string)$primaryBody, 'Invoice'), 'Primary ES query contains semantic expansion');
+        check(str_contains((string)$expandedBody, 'Invoice'), 'Expanded ES query does not contain expansion terms');
+        check(str_contains((string)$primaryBody, '2020'), 'Primary ES query lost year constraint');
+        check(str_contains((string)$expandedBody, '2020'), 'Expanded ES query lost year constraint');
+    };
+
+    $tests['analysis exposes three-way request partition and raw compiled ES stage bodies'] = function () use ($root): void {
+        $source = file_get_contents($root . '/lib/Service/SearchService.php');
+        check(is_string($source), 'SearchService source could not be read');
+        check(str_contains($source, "'information_interest' => ["), 'Information-interest partition missing');
+        check(str_contains($source, "'search_specifications' => ["), 'Search-specification partition missing');
+        check(str_contains($source, "'answer_requirements' => is_array"), 'Answer-requirement partition missing');
+        check(str_contains($source, "'stages' => is_array(\$retrieval['retrieval_stages'] ?? null)"), 'Executed retrieval stages are absent from analysis diagnostics');
+        check(str_contains($source, "'authorized_hits' => \$this->analysisRetrievalHits("), 'Pre-answer authorized hit diagnostics are absent');
+    };
+
+
+    $tests['canonical concept form is promoted from expansion into primary terms'] = function (): void {
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnungen'],
+                'expansion_terms' => ['Rechnung', 'Rechnungsnummer', 'Invoice'],
+            ]],
+        ], 'Suche Rechnungen');
+
+        $group = $spec['concept_groups'][0] ?? [];
+        check(($group['primary_terms'] ?? []) === ['Rechnungen', 'Rechnung'], 'Canonical concept was not promoted into primary terms');
+        check(($group['expansion_terms'] ?? []) === ['Rechnungsnummer', 'Invoice'], 'Promoted canonical concept remained in expansion terms');
+        check(($group['terms'] ?? []) === ['Rechnungen', 'Rechnung', 'Rechnungsnummer', 'Invoice'], 'Combined concept terms are inconsistent after promotion');
+    };
+
+    $tests['invoice primary ES query contains singular and plural plus year constraint'] = function (): void {
+        $query = 'Suche Rechnungen der Eboracum aus 2020';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => $query,
+            'entities' => ['Eboracum'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [[
+                'required' => true,
+                'primary_terms' => ['Rechnungen'],
+                'expansion_terms' => ['Rechnung', 'Rechnungsnummer', 'Invoice'],
+            ]],
+            'constraints' => [['kind' => 'year', 'value' => '2020']],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query);
+
+        $primaryPlan = $plan;
+        $primaryPlan['lexical_groups'] = $plan['primary_lexical_groups'];
+        $body = (new ElasticsearchCompiler())->compile($primaryPlan, $query, 15);
+        $json = json_encode($body['query']['bool']['must'] ?? [], JSON_UNESCAPED_UNICODE);
+
+        check(str_contains((string)$json, 'Eboracum'), 'Primary ES query lost Eboracum');
+        check(str_contains((string)$json, 'Rechnungen'), 'Primary ES query lost user surface form');
+        check(str_contains((string)$json, 'Rechnung'), 'Primary ES query lost canonical singular form');
+        check(str_contains((string)$json, '2020'), 'Primary ES query lost year constraint');
+        check(str_contains((string)$json, '"dis_max"'), 'Equivalent primary lexical alternatives are not compiled with non-additive scoring');
+        check(str_contains((string)$json, '"tie_breaker":0'), 'Alternative lexical forms still add score across variants');
+        check(!str_contains((string)$json, 'Invoice'), 'Semantic expansion leaked into primary ES query');
+        check(!str_contains((string)$json, 'Rechnungsnummer'), 'Related expansion leaked into primary ES query');
+    };
+
+
+    $tests['Elasticsearch compiler permits a bounded 100-hit diagnostic horizon'] = function (): void {
+        $body = (new ElasticsearchCompiler())->compile([
+            'search_mode' => 'search_spec',
+            'lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Eboracum']],
+                ['required' => true, 'kind' => 'constraint:year', 'terms' => ['2020']],
+            ],
+            'required_literals' => [],
+            'hard_constraints' => [],
+        ], 'Eboracum 2020', 100);
+
+        check(($body['size'] ?? 0) === 100, 'Compiler still caps the Elasticsearch horizon below 100');
+    };
+
+
+    $tests['evidence builder accepts 25 documents within expanded character budget'] = function (): void {
+        $hits = [];
+        for ($id = 1; $id <= 25; $id++) {
+            $hits[] = [
+                'authorized' => true,
+                'file_id' => $id,
+                'name' => 'doc-' . $id . '.pdf',
+                'path' => '/docs/doc-' . $id . '.pdf',
+                'snippet' => str_repeat('x', 300),
+                'url' => '/f/' . $id,
+            ];
+        }
+
+        $built = (new EvidenceBuilder())->build($hits, 25);
+        check(count($built['documents']) === 25, 'EvidenceBuilder still truncates configured 25-document evaluation');
+        check(strlen($built['json']) <= 16000, 'Evidence JSON exceeds the expanded 16000-character budget');
+    };
+
+
+    $tests['planner deduplicates identical entity and concept lexical requirements'] = function (): void {
+        $query = 'Suche Rechnungen der Eboracum aus 2021 an die RAW Capital';
+        $spec = (new SearchSpecNormalizer())->normalize([
+            'semantic_query' => $query,
+            'entities' => ['Eboracum', 'RAW Capital'],
+            'concepts' => ['Rechnung'],
+            'concept_groups' => [
+                [
+                    'required' => true,
+                    'primary_terms' => ['Rechnungen', 'Rechnung'],
+                    'expansion_terms' => ['Invoice'],
+                ],
+                [
+                    'required' => true,
+                    'primary_terms' => ['RAW Capital'],
+                    'expansion_terms' => [],
+                ],
+            ],
+            'constraints' => [['kind' => 'year', 'value' => '2021']],
+        ], $query);
+
+        $plan = (new RetrievalPlanner(new HardConstraintExtractor()))
+            ->planFromSearchSpec($spec, $query);
+
+        $rawCapitalGroups = array_values(array_filter(
+            $plan['primary_lexical_groups'] ?? [],
+            static function ($group): bool {
+                return is_array($group)
+                    && ($group['terms'] ?? []) === ['RAW Capital'];
+            }
+        ));
+
+        check(count($rawCapitalGroups) === 1, 'RAW Capital remained duplicated across entity and concept groups');
+    };
+
+    $tests['probable typo guidance states the form actually used for retrieval'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'searchGuidance');
+        $method->setAccessible(true);
+
+        $guidance = $method->invoke($service, 'Suche Rachnungen der Eboracum', [
+            'semantic_query' => 'Suche Rechnungen der Eboracum.',
+            'required_literals' => [],
+            'term_interpretations' => [[
+                'original' => 'Rachnungen',
+                'status' => 'probable_typo',
+                'alternatives' => ['Rechnungen'],
+            ]],
+            'alternative_interpretations' => [],
+        ]);
+
+        check(str_contains($guidance, 'interpreted for retrieval as “Rechnungen”'), 'Typo guidance does not state the executed correction');
+        check(!str_contains($guidance, 'also considered'), 'Typo guidance still implies both spellings were searched');
+    };
+
+    $tests['quoted literal guidance and strategy expose the mandatory original spelling'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+
+        $guidanceMethod = new \ReflectionMethod(SearchService::class, 'searchGuidance');
+        $guidanceMethod->setAccessible(true);
+        $query = 'Suche "Rachnungen" der Eboracum aus 2021 an die RAW Capital';
+        $context = [
+            'semantic_query' => 'Suche Rechnungen der Eboracum aus dem Jahr 2021 an die RAW Capital.',
+            'required_literals' => ['Rachnungen'],
+            'term_interpretations' => [[
+                'original' => 'Rachnungen',
+                'status' => 'ambiguous',
+                'alternatives' => ['Rechnungen'],
+            ]],
+            'alternative_interpretations' => [],
+        ];
+        $guidance = $guidanceMethod->invoke($service, $query, $context);
+
+        check(str_contains($guidance, 'Search request with literal wording preserved: ' . $query), 'Quoted search guidance replaced the literal user request with a corrected semantic query');
+        check(str_contains($guidance, 'quoted term “Rachnungen” was searched literally'), 'Quoted literal search is not explained');
+        check(!str_contains($guidance, 'Search interpretation: Suche Rechnungen'), 'Quoted literal guidance still presents the corrected semantic query as the executed search');
+
+        $strategyMethod = new \ReflectionMethod(SearchService::class, 'searchStrategy');
+        $strategyMethod->setAccessible(true);
+        $strategy = $strategyMethod->invoke($service, [
+            'search_mode' => 'search_spec',
+            'required_literals' => ['Rachnungen'],
+            'primary_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Eboracum']],
+                ['required' => true, 'kind' => 'entity', 'terms' => ['RAW Capital']],
+                ['required' => true, 'kind' => 'concept:primary', 'terms' => ['Rechnungen', 'Rechnung']],
+                ['required' => true, 'kind' => 'concept:primary', 'terms' => ['RAW Capital']],
+                ['required' => true, 'kind' => 'constraint:year', 'terms' => ['2021']],
+            ],
+            'expanded_lexical_groups' => [
+                ['required' => true, 'kind' => 'entity', 'terms' => ['Eboracum']],
+                ['required' => true, 'kind' => 'entity', 'terms' => ['RAW Capital']],
+                ['required' => true, 'kind' => 'concept:expanded', 'terms' => ['Rechnungen', 'Rechnung', 'Invoice']],
+                ['required' => true, 'kind' => 'concept:expanded', 'terms' => ['RAW Capital']],
+                ['required' => true, 'kind' => 'constraint:year', 'terms' => ['2021']],
+            ],
+            'retrieval_stages' => [],
+            'applied_constraints' => [['kind' => 'year', 'value' => '2021']],
+            'verification_requirements' => [],
+        ]);
+
+        check(str_contains($strategy, '"Rachnungen"'), 'Search strategy omits the mandatory quoted literal');
+        check(substr_count($strategy, 'RAW Capital') === 2, 'Duplicate RAW Capital appears more than once per primary/expanded strategy line');
+    };
+
+    $tests['length-limited empty LLM response is diagnosed as completion budget exhaustion'] = function (): void {
+        $client = new LlmClient(
+            new LengthLimitedClientService(),
+            new FakeLlmConfigService('https://api.openai.com/v1', 'gpt-5.6')
+        );
+
+        $exception = expectException(
+            fn() => $client->complete(
+                [['role' => 'user', 'content' => 'test']],
+                1600,
+                true,
+                90,
+                false,
+                'none'
+            ),
+            \RuntimeException::class
+        );
+
+        check(
+            $exception->getMessage() === 'The configured LLM endpoint exhausted its completion budget before returning usable content',
+            'Length-limited empty response still reports only generic no-content failure'
+        );
+    };
+
+    $tests['English question changes only answer language not SearchSpec language plumbing'] = function () use ($root): void {
+        $rewriter = file_get_contents($root . '/lib/Service/QueryRewriteService.php');
+        $normalizer = file_get_contents($root . '/lib/Service/SearchSpecNormalizer.php');
+        $answerer = file_get_contents($root . '/lib/Service/AnswerService.php');
+
+        check(is_string($rewriter) && is_string($normalizer) && is_string($answerer), 'Language sources could not be read');
+        check(!str_contains($rewriter, 'response_language'), 'Request-language field still alters planner output');
+        check(!str_contains($normalizer, "'response_language'"), 'Request-language field still alters SearchSpec');
+        check(str_contains($rewriter, "'interaction_language' => \$this->interactionLanguage()"), '0.4.1.17 planner language behavior was not restored');
+        check(str_contains($answerer, 'language of ORIGINAL_USER_REQUEST_JSON'), 'Answerer does not independently follow original question language');
+    };
+
+    $tests['slash directives parse without leaking into search request'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'parseDirective');
+        $method->setAccessible(true);
+
+        $help = $method->invoke($service, '  /help  ');
+        $list = $method->invoke($service, '/list When did Leon buy a car?');
+        $normal = $method->invoke($service, 'When did Leon buy a car?');
+
+        check(($help['mode'] ?? '') === 'help' && ($help['query'] ?? 'x') === '', '/help directive was not recognized');
+        check(($list['mode'] ?? '') === 'list', '/list directive was not recognized');
+        check(($list['query'] ?? '') === 'When did Leon buy a car?', '/list directive was not removed from the planner query');
+        check(($normal['mode'] ?? '') === 'answer' && ($normal['query'] ?? '') === 'When did Leon buy a car?', 'Ordinary query was changed by directive parsing');
+    };
+
+    $tests['list mode keeps all authorized deduplicated retrieval hits as sources'] = function (): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(SearchService::class, 'listSources');
+        $method->setAccessible(true);
+
+        $sources = $method->invoke($service, [
+            ['authorized' => true, 'file_id' => 10, 'name' => 'one.pdf', 'path' => '/one.pdf', 'url' => '/f/10', 'snippet' => 'one'],
+            ['authorized' => false, 'file_id' => 11, 'name' => 'denied.pdf', 'path' => '/denied.pdf', 'url' => '/f/11', 'snippet' => 'secret'],
+            ['authorized' => true, 'file_id' => 12, 'name' => 'two.pdf', 'path' => '/two.pdf', 'url' => '/f/12', 'snippet' => 'two'],
+        ]);
+
+        check(count($sources) === 2, '/list did not keep exactly the authorized retrieval hits');
+        check(($sources[0]['file_id'] ?? 0) === 10 && ($sources[0]['index'] ?? 0) === 1, '/list changed first-hit ranking');
+        check(($sources[1]['file_id'] ?? 0) === 12 && ($sources[1]['index'] ?? 0) === 2, '/list changed second-hit ranking');
+        check(!str_contains(json_encode($sources), 'secret'), '/list exposed denied content');
+    };
+
+    $tests['help command is backed by HELP markdown and localized through Nextcloud strings'] = function () use ($root): void {
+        $help = file_get_contents($root . '/docs/HELP.md');
+        $service = file_get_contents($root . '/lib/Service/SearchService.php');
+        $de = json_decode((string)file_get_contents($root . '/l10n/de.json'), true);
+        $script = file_get_contents($root . '/js/search.js');
+
+        check(is_string($help) && str_contains($help, '/list [request]') && str_contains($help, '/help'), 'HELP.md does not document both slash commands');
+        check(is_string($service) && str_contains($service, "dirname(__DIR__, 2) . '/docs/HELP.md'"), '/help is not sourced from HELP.md');
+        check(is_array($de) && (($de['translations']['Help'] ?? '') === 'Hilfe'), 'German help title translation is missing');
+        check(is_array($de) && isset($de['translations']['Use /help to see this message.']), 'German HELP.md line translation is missing');
+        check(is_string($script) && str_contains($script, "mode === 'list'") && str_contains($script, "mode === 'help'"), 'Search UI does not render slash-command modes');
+    };
+
+    $tests['help content does not duplicate the UI heading'] = function () use ($root): void {
+        $help = trim((string)file_get_contents($root . '/docs/HELP.md'));
+        check(substr($help, 0, 6) !== '# Help', 'HELP.md still duplicates the Help card heading');
+    };
+
+    $tests['negative answer markers are removed and visible sources are suppressed'] = function () use ($root): void {
+        $service = (new \ReflectionClass(SearchService::class))->newInstanceWithoutConstructor();
+        $strip = new \ReflectionMethod(SearchService::class, 'stripEvidenceMarkers');
+        $strip->setAccessible(true);
+
+        $clean = $strip->invoke($service, 'No reliable answer [[file-12]] from the available evidence.');
+        check($clean === 'No reliable answer from the available evidence.', 'Negative-answer evidence marker was not removed');
+
+        $source = (string)file_get_contents($root . '/lib/Service/SearchService.php');
+        check(
+            str_contains($source, "if (!\$answerFound)") && str_contains($source, "\$evidence['sources'] = [];"),
+            'Normal negative answers do not suppress the visible sources list'
+        );
+        check(
+            str_contains($source, "'answer_evidence'") && str_contains($source, "\$evidence['documents']"),
+            'Analysis evidence was removed together with visible negative-answer sources'
+        );
+    };
+
+    $tests['empty answer and source cards remain hidden'] = function () use ($root): void {
+        $script = (string)file_get_contents($root . '/js/search.js');
+        $css = (string)file_get_contents($root . '/css/probe.css');
+
+        check(
+            str_contains($script, "show('sunaqfind-answer-card', answerContent !== '')"),
+            'Answer card is still shown without answer content'
+        );
+        check(
+            str_contains($script, "show('sunaqfind-sources-card', (sources || []).length > 0)"),
+            'Sources card is not tied to a non-empty source list'
+        );
+        check(
+            str_contains($css, '.sunaqfind-card[hidden]') && str_contains($css, 'display: none !important;'),
+            'Hidden result cards can still be made visible by external CSS'
+        );
     };
 
     $failed = 0;

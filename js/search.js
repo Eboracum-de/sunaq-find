@@ -390,8 +390,12 @@
         if (!query) { return; }
 
         var answerTitle = document.getElementById('sunaqfind-answer-title');
+        var sourcesTitle = document.getElementById('sunaqfind-sources-title');
         if (answerTitle) {
             answerTitle.textContent = t('sunaqfind', 'Answer');
+        }
+        if (sourcesTitle) {
+            sourcesTitle.textContent = t('sunaqfind', 'Sources');
         }
         setLoadingText(t('sunaqfind', 'Searching …'));
         setLoading(true);
@@ -413,17 +417,33 @@
             },
             body: JSON.stringify({query: query})
         }).then(decodeResponse).then(function (result) {
+            var mode = result.mode || 'answer';
             var answer = document.getElementById('sunaqfind-answer');
-            if (answer) {
-                renderMarkdown(answer, result.answer || '');
+            var resultAnswerTitle = document.getElementById('sunaqfind-answer-title');
+            var resultSourcesTitle = document.getElementById('sunaqfind-sources-title');
+
+            if (resultAnswerTitle) {
+                resultAnswerTitle.textContent = mode === 'help'
+                    ? t('sunaqfind', 'Help')
+                    : (mode === 'list' ? t('sunaqfind', 'Documents') : t('sunaqfind', 'Answer'));
             }
-            show('sunaqfind-answer-card', true);
+            if (resultSourcesTitle) {
+                resultSourcesTitle.textContent = mode === 'list'
+                    ? t('sunaqfind', 'Documents')
+                    : t('sunaqfind', 'Sources');
+            }
+            var answerContent = String(result.answer || '').trim();
+            if (answer) {
+                renderMarkdown(answer, answerContent);
+            }
+            show('sunaqfind-answer-card', answerContent !== '');
             renderSearchStrategy(result.search_strategy || '');
             renderSources(result.sources || []);
 
             if (result.analysis_enabled) {
                 var analysis = {
                     query_analysis: result.query_analysis || {},
+                    answer_evidence: result.answer_evidence || [],
                     retrieval: result.retrieval || {},
                     answer_error: !!result.answer_error
                 };
