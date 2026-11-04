@@ -7,22 +7,22 @@ SunaQ Find is a lightweight native Nextcloud app that gives you AI-assisted
 natural-language access to your existing Nextcloud FullTextSearch /
 Elasticsearch stack. It deliberately does **not** add a second search stack.
 
-SunaQ Find uses AI to understand user's request and then converts it into a
-deterministic search plan to find documents answering the request. Each document
-found ist then checked live against Nextcloud to determine whether the user
-has access to the document. Authorized Evidence ist the sent to the AI to generate
+SunaQ Find uses AI to understand the user's request and then converts it into a
+deterministic search plan to find documents that may answer the request. Each
+retrieved document is then checked live against Nextcloud to determine whether
+the user has access to it. Only authorized evidence is sent to the AI to generate
 the answer.
 
-The performance of SunaQ Find depends on both the quality of the Eleasticsearch index
-and the quality of the LLM used. Some are better in understanding the question than
-others, also LLMs do not provide a deterministic response to a given input. Reasonable
-performance has been achieved with models in the class of qwen3:8b, the better the model,
-the better the performance
+The performance of SunaQ Find depends on both the quality of the Elasticsearch
+index and the quality of the LLM used. Some models are better at understanding
+search requests than others, and LLMs do not provide a deterministic response to
+a given input. Reasonable performance has been achieved with models in the class
+of qwen3:8b; more capable models generally improve results.
 
-Note, that SunaQ Find is not a replacement for a fully featured RAG. SunaQ Find
+Note that SunaQ Find is not a replacement for a fully featured RAG. SunaQ Find
 will respond to tasks like "List all documents pertaining to X in descending order"
-and will list the documents found. But there is no guarantee for completeness,
-since the there might exist more relevant documents than fit in the retrieval window.
+and will list the documents found. But there is no guarantee of completeness,
+because there may be more relevant documents than fit in the retrieval window.
 
 Search requests do not use Nextcloud's AI task-processing pipeline and are not
 queued for a background worker or cron job. Once the existing FullTextSearch
