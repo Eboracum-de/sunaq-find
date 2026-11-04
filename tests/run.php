@@ -302,7 +302,7 @@ namespace {
 
     final class FailOnSecondSearchClientService implements IClientService {
         public array $calls = [];
-        private int $index = 0;
+        public int $index = 0;
 
         public function __construct(private array $firstPayload) {}
 
@@ -2506,7 +2506,10 @@ namespace {
         check(($filenameConstraints[0]['value'] ?? '') === 'report-2020.pdf', 'Complete filename kind/value was not preserved');
 
         $body = (new ElasticsearchCompiler())->compile($plan, $query);
-        $must = json_encode($body['query']['bool']['must'] ?? [], JSON_UNESCAPED_UNICODE);
+        $must = json_encode(
+            $body['query']['bool']['must'] ?? [],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
         check(str_contains((string)$must, '"term":{"title":"report-2020.pdf"}'), 'Filename constraint lacks exact title term');
         check(str_contains((string)$must, '"wildcard":{"title":"*/report-2020.pdf"}'), 'Filename constraint lacks exact path-suffix match');
         check(!str_contains((string)$must, '"match_phrase":{"content":"report-2020.pdf"}'), 'Filename constraint still degrades to analyzed content matching');
