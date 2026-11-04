@@ -124,7 +124,7 @@
                 setChecked('sunaqfind-direct-lexical-routing', config.direct_lexical_routing);
                 setChecked('sunaqfind-show-document-excerpts', config.show_document_excerpts);
                 setChecked('sunaqfind-show-search-strategy', config.show_search_strategy);
-                result.textContent = t('sunaqfind', 'Saved – analysis mode ') + (config.analysis_mode ? t('sunaqfind', 'on') : t('sunaqfind', 'off'));
+                result.textContent = t('sunaqfind', 'Configuration saved. Connection tests now use these saved values.');
                 document.getElementById('sunaqfind-elastic-password').value = '';
                 document.getElementById('sunaqfind-llm-api-key').value = '';
                 setChecked('sunaqfind-clear-elastic-password', false);

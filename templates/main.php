@@ -1,7 +1,9 @@
 <?php
-script('sunaqfind', 'search');
-if (!empty($_['analysis_mode'])) {
-    script('sunaqfind', 'variance-test');
+if (!empty($_['configured'])) {
+    script('sunaqfind', 'search');
+    if (!empty($_['analysis_mode'])) {
+        script('sunaqfind', 'variance-test');
+    }
 }
 style('sunaqfind', 'probe');
 ?>
@@ -12,6 +14,17 @@ style('sunaqfind', 'probe');
         <p><?php p($l->t('Ask questions about your Nextcloud documents with AI.')); ?></p>
     </header>
 
+<?php if (empty($_['configured'])) { ?>
+    <section class="sunaqfind-card sunaqfind-setup-card">
+        <h3><?php p($l->t('SunaQ Find is not configured yet.')); ?></h3>
+        <?php if (!empty($_['is_admin']) && !empty($_['admin_url'])) { ?>
+            <p><?php p($l->t('Before using search, configure the Elasticsearch and AI connections in the administration settings.')); ?></p>
+            <p><a class="button primary" href="<?php p($_['admin_url']); ?>"><?php p($l->t('Open administration settings')); ?></a></p>
+        <?php } else { ?>
+            <p><?php p($l->t('SunaQ Find is not available yet because an administrator has not completed the configuration.')); ?></p>
+        <?php } ?>
+    </section>
+<?php } else { ?>
     <form id="sunaqfind-form" class="sunaqfind-searchbar" role="search">
         <label class="hidden-visually" for="sunaqfind-query"><?php p($l->t('Search query')); ?></label>
         <input
@@ -129,6 +142,7 @@ style('sunaqfind', 'probe');
             </div>
         </div>
     </details>
+<?php } ?>
 <?php } ?>
 </main>
 </div>

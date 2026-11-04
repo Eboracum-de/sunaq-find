@@ -870,6 +870,23 @@ namespace {
         check(str_contains($template, 'currently saved configuration'), 'Saved-config test semantics are not explained');
         check(str_contains($script, '/admin/test/elasticsearch'), 'Elasticsearch test button is not wired');
         check(str_contains($script, '/admin/test/llm'), 'LLM test button is not wired');
+        check(str_contains($template, 'unsaved values are ignored'), 'Admin UI does not warn that unsaved connection values are ignored');
+    };
+
+    $tests['first-run configuration state blocks an unusable search UI'] = function () use ($root): void {
+        $config = file_get_contents($root . '/lib/Service/ConfigService.php');
+        $page = file_get_contents($root . '/lib/Controller/PageController.php');
+        $search = file_get_contents($root . '/lib/Controller/SearchController.php');
+        $template = file_get_contents($root . '/templates/main.php');
+
+        check(is_string($config) && is_string($page) && is_string($search) && is_string($template), 'First-run setup sources could not be read');
+        check(str_contains($config, 'public function isConfigured(): bool'), 'Configuration readiness check is missing');
+        check(str_contains($page, "'configured' => \$configured"), 'Page controller does not expose configuration readiness');
+        check(str_contains($page, "'settings.AdminSettings.index'"), 'Admin first-run link does not use the Nextcloud settings route');
+        check(str_contains($template, "if (empty(\$_['configured']))"), 'Main page does not render a dedicated first-run state');
+        check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
+        check(str_contains($search, 'if (!\$this->config->isConfigured())'), 'Direct search requests are not guarded before setup');
+        check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
     };
 
     $tests['fresh installs allow configured private endpoints by default'] = function () use ($root): void {
@@ -930,7 +947,7 @@ namespace {
         check(str_contains($controller, '$this->request->getParams()'), 'Admin save still relies on implicit controller parameter binding');
         check(str_contains($controller, 'array_key_exists($key, $values)'), 'Admin boolean parser cannot distinguish missing values');
         check(str_contains($script, "setChecked('sunaqfind-analysis-mode', config.analysis_mode)"), 'Saved analysis mode is not reflected from server state');
-        check(str_contains($script, "'Saved – analysis mode '"), 'Admin save confirmation does not report effective analysis mode');
+        check(str_contains($script, "'Configuration saved. Connection tests now use these saved values.'"), 'Admin save confirmation does not explain the save-before-test flow');
     };
 
     $tests['ACL validator keeps PHP 7.4-compatible declared dependencies'] = function () use ($root): void {
