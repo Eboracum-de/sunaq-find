@@ -5,6 +5,9 @@ style('sunaqfind', 'probe');
 <div id="sunaqfind-admin" class="section">
     <h2>SunaQ Find</h2>
     <p><strong><?php p($l->t('Version:')); ?></strong> <code><?php p($_['app_version']); ?></code></p>
+    <p>
+        <a href="https://github.com/Eboracum-de/sunaq-find/blob/main/docs/ADMIN.md" target="_blank" rel="noopener noreferrer"><?php p($l->t('Administration guide')); ?></a>
+    </p>
     <p><?php p($l->t('Leave Elasticsearch URL/index empty to use the first host and index detected from fulltextsearch_elasticsearch.')); ?></p>
     <p><em><?php p($l->t('Connection tests use the currently saved configuration. Save changes before testing.')); ?></em></p>
 

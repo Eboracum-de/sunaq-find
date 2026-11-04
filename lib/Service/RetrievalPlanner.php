@@ -31,13 +31,22 @@ final class RetrievalPlanner {
         ));
         if ($originalQuery !== '') {
             $safe = $this->hardConstraints->extract($originalQuery);
-            foreach (['filenames', 'identifiers', 'dates', 'years'] as $constraintKind) {
-                foreach (($safe[$constraintKind] ?? []) as $constraint) {
+            $constraintKinds = [
+                'filenames' => 'filename',
+                'identifiers' => 'identifier',
+                'dates' => 'date',
+                'years' => 'year',
+            ];
+            foreach ($constraintKinds as $sourceKind => $appliedKind) {
+                foreach (($safe[$sourceKind] ?? []) as $constraint) {
                     $constraint = trim((string)$constraint);
+                    if ($appliedKind === 'date' && !$this->isValidDateConstraint($constraint)) {
+                        continue;
+                    }
                     if ($constraint !== '' && !in_array($constraint, $hardConstraints, true)) {
                         $hardConstraints[] = $constraint;
                         $appliedConstraints[] = [
-                            'kind' => 'literal',
+                            'kind' => $appliedKind,
                             'value' => $constraint,
                         ];
                     }
@@ -215,7 +224,7 @@ final class RetrievalPlanner {
                     continue;
                 }
             } elseif ($kind === 'date') {
-                if (preg_match('/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})$/u', $value) !== 1) {
+                if (!$this->isValidDateConstraint($value)) {
                     continue;
                 }
             } else {
@@ -234,6 +243,26 @@ final class RetrievalPlanner {
         }
 
         return $out;
+    }
+
+    private function isValidDateConstraint(string $value): bool {
+        $day = 0;
+        $month = 0;
+        $year = 0;
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $match) === 1) {
+            $year = (int)$match[1];
+            $month = (int)$match[2];
+            $day = (int)$match[3];
+        } elseif (preg_match('/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/u', $value, $match) === 1) {
+            $day = (int)$match[1];
+            $month = (int)$match[2];
+            $year = (int)$match[3];
+        } else {
+            return false;
+        }
+
+        return checkdate($month, $day, $year);
     }
 
     private function quotedLiterals(string $query): array {

@@ -60,11 +60,11 @@ final class AdminController extends Controller {
         $searchDocumentLimit = $integer($params, 'searchDocumentLimit', 15);
         $llmDocumentLimit = $integer($params, 'llmDocumentLimit', 12);
 
-        if ($searchDocumentLimit < 1 || $searchDocumentLimit > 20) {
-            return new DataResponse(['ok' => false, 'error' => $this->t('Maximum Elasticsearch hits must be between 1 and 20.')], 400);
+        if ($searchDocumentLimit < 1 || $searchDocumentLimit > 100) {
+            return new DataResponse(['ok' => false, 'error' => $this->t('Maximum Elasticsearch hits must be between 1 and 100.')], 400);
         }
-        if ($llmDocumentLimit < 1 || $llmDocumentLimit > 20) {
-            return new DataResponse(['ok' => false, 'error' => $this->t('Maximum documents for AI evaluation must be between 1 and 20.')], 400);
+        if ($llmDocumentLimit < 1 || $llmDocumentLimit > 25) {
+            return new DataResponse(['ok' => false, 'error' => $this->t('Maximum documents for AI evaluation must be between 1 and 25.')], 400);
         }
         if ($llmDocumentLimit > $searchDocumentLimit) {
             return new DataResponse(['ok' => false, 'error' => $this->t('Maximum documents for AI evaluation cannot exceed maximum Elasticsearch hits.')], 400);

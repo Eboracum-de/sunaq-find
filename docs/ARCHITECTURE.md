@@ -60,6 +60,14 @@ lexical clauses by host code. They are exact content/title requirements, not
 claims about the semantic role of a date inside a document; semantic relations
 such as "invoice date is in 2020" remain subject to evidence verification.
 
+Complete filenames recognized in the original request are matched against the
+keyword-analyzed Nextcloud `title` field, preserving punctuation and allowing
+both a bare filename and a path ending in that filename. Identifiers occurring
+inside document content are different: FullTextSearch exposes `content` as an
+analyzed text field without a keyword copy. Identifier constraints are therefore
+required lexical phrase constraints, but punctuation-exact matching inside
+content cannot be guaranteed without changing the host FullTextSearch mapping.
+
 If planning fails or produces no usable positive lexical anchors, the app falls
 back to a broad bounded search using the original question. Deterministically
 recognizable hard constraints from the original request, such as explicit years,
@@ -90,10 +98,12 @@ identity metadata cannot be used technically, SunaQ Find sends the same
 deterministically bounded query without the metadata filter and still applies
 live ACL checks to every returned candidate.
 
-The configured Elasticsearch document limit is a hard `size` bound. There is
-no automatic refill, second query, or overfetch budget after ACL rejection. A
-separate administrator-controlled evidence limit bounds how many authorized
-results can be sent to the answer model.
+The configured Elasticsearch document limit is a hard `size` bound for each
+retrieval stage. When staged retrieval applies and the authorized primary
+results do not fill the retrieval target, at most one expansion query runs with
+the same bound. No further refill runs after ACL rejection, and there is no
+separate overfetch budget. A separate administrator-controlled evidence limit
+bounds how many authorized results can be sent to the answer model.
 
 ## Evidence boundary
 
@@ -128,7 +138,8 @@ middleware service.
 
 SunaQ Find is intentionally a lightweight AI-assisted file-search application,
 not a general-purpose RAG platform. It uses the existing FullTextSearch /
-Elasticsearch index, one bounded retrieval pass, live Nextcloud ACL enforcement
-and direct synchronous LLM evaluation. Evidence is built from bounded snippets
+Elasticsearch index, one primary bounded retrieval pass and at most one
+expansion pass, live Nextcloud ACL enforcement and direct synchronous LLM
+evaluation. Evidence is built from bounded snippets
 of authorized documents. Vector or graph retrieval, web research, chat archives
 and conversation state are deliberately outside this app's scope.

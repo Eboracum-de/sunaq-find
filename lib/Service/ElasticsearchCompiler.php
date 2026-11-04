@@ -73,11 +73,14 @@ final class ElasticsearchCompiler {
                 }
                 $alternatives = [];
                 $groupKind = (string)($group['kind'] ?? '');
+                $constraintKind = strncmp($groupKind, 'constraint:', 11) === 0
+                    ? substr($groupKind, 11)
+                    : '';
                 foreach (($group['terms'] ?? []) as $term) {
                     $term = trim((string)$term);
                     if ($term !== '') {
-                        $alternatives[] = strncmp($groupKind, 'constraint:', 11) === 0
-                            ? $this->constraintTermClause($term)
+                        $alternatives[] = $constraintKind !== ''
+                            ? $this->constraintTermClause($term, $constraintKind)
                             : $this->lexicalTermClause($term);
                     }
                 }
@@ -112,10 +115,26 @@ final class ElasticsearchCompiler {
         }
 
         if (in_array($mode, ['fallback_original', 'direct_lexical'], true)) {
-            foreach (($plan['hard_constraints'] ?? []) as $constraint) {
-                $constraint = trim((string)$constraint);
-                if ($constraint !== '') {
-                    $bool['must'][] = $this->constraintTermClause($constraint);
+            $typedConstraints = is_array($plan['applied_constraints'] ?? null)
+                ? $plan['applied_constraints']
+                : [];
+            if ($typedConstraints !== []) {
+                foreach ($typedConstraints as $constraint) {
+                    if (!is_array($constraint)) {
+                        continue;
+                    }
+                    $value = trim((string)($constraint['value'] ?? ''));
+                    $kind = trim((string)($constraint['kind'] ?? 'literal'));
+                    if ($value !== '') {
+                        $bool['must'][] = $this->constraintTermClause($value, $kind);
+                    }
+                }
+            } else {
+                foreach (($plan['hard_constraints'] ?? []) as $constraint) {
+                    $constraint = trim((string)$constraint);
+                    if ($constraint !== '') {
+                        $bool['must'][] = $this->constraintTermClause($constraint);
+                    }
                 }
             }
         }
@@ -174,12 +193,29 @@ final class ElasticsearchCompiler {
         ];
     }
 
-    private function constraintTermClause(string $term): array {
+    private function constraintTermClause(string $term, string $kind = 'literal'): array {
         $value = trim($term);
         if ($value === '') {
             return ['match_none' => (object)[]];
         }
 
+        if ($kind === 'filename') {
+            $escaped = $this->escapeWildcardTerm($value);
+            return [
+                'bool' => [
+                    'should' => [
+                        ['term' => ['title' => $value]],
+                        ['wildcard' => ['title' => '*/' . $escaped]],
+                    ],
+                    'minimum_should_match' => 1,
+                ],
+            ];
+        }
+
+        // Nextcloud indexes document content as analyzed text. Exact
+        // punctuation cannot be reconstructed reliably for identifiers there,
+        // so identifier/date/year constraints remain phrase matches. Filename
+        // constraints are handled above against the keyword-analyzed title.
         return [
             'bool' => [
                 'should' => [
@@ -189,6 +225,14 @@ final class ElasticsearchCompiler {
                 'minimum_should_match' => 1,
             ],
         ];
+    }
+
+    private function escapeWildcardTerm(string $value): string {
+        return strtr($value, [
+            '\\' => '\\\\',
+            '*' => '\\*',
+            '?' => '\\?',
+        ]);
     }
 
     private function lexicalPhraseClause(string $term): array {

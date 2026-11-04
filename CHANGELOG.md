@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+- Reject positive AI answers that cannot be tied to valid evidence citations.
+- Preserve authorized primary results when the optional expansion search fails.
+- Validate calendar dates before promoting them to required retrieval constraints.
+- Preserve hard-constraint kinds and enforce punctuation-exact complete filenames against Nextcloud titles.
+- Keep analysis citation explanations limited to evidence records actually supplied to the answer model.
+- Correct search-strategy wording for optional terms, typo alternatives, staged retrieval, and documented retrieval limits.
+
 ## 0.4.1
 
 - Added `/list` for retrieval-only document lists and localized `/help` based on the bundled help text.
