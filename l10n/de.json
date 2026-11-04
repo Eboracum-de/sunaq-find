@@ -1,6 +1,7 @@
 {
   "translations": {
     "Version:": "Version:",
+        "Administration guide": "Administrationshandbuch",
     "Leave Elasticsearch URL/index empty to use the first host and index detected from fulltextsearch_elasticsearch.": "Elasticsearch-URL und -Index leer lassen, um den ersten aus fulltextsearch_elasticsearch erkannten Host und Index zu verwenden.",
     "Connection tests use the currently saved configuration. Save changes before testing.": "Die Verbindungstests verwenden die aktuell gespeicherte Konfiguration. Änderungen daher zuerst speichern und anschließend testen.",
     "Index": "Index",
@@ -124,8 +125,8 @@
     "Target maximum for authorized documents kept from Elasticsearch retrieval (up to 100). A bounded expansion query may run when the primary search does not fill this target. AI evaluation remains separately limited.": "Zielobergrenze für autorisierte Dokumente aus dem Elasticsearch-Retrieval (bis 100). Eine begrenzte Erweiterungssuche kann ausgeführt werden, wenn die Primärsuche diese Zielmenge nicht füllt. Die KI-Auswertung bleibt separat begrenzt.",
     "Maximum documents for AI evaluation": "Maximale Dokumente für die KI-Auswertung",
     "Maximum number of live-ACL-authorized search results included in the evidence sent to the AI. Must not exceed the Elasticsearch hit limit.": "Maximale Anzahl der durch die Live-ACL autorisierten Suchtreffer, die als Evidenz an die KI gesendet werden. Darf die Elasticsearch-Treffergrenze nicht überschreiten.",
-    "Maximum Elasticsearch hits must be between 1 and 20.": "Die maximale Anzahl der Elasticsearch-Treffer muss zwischen 1 und 20 liegen.",
-    "Maximum documents for AI evaluation must be between 1 and 20.": "Die maximale Anzahl der Dokumente für die KI-Auswertung muss zwischen 1 und 20 liegen.",
+    "Maximum Elasticsearch hits must be between 1 and 100.": "Die maximale Anzahl der Elasticsearch-Treffer muss zwischen 1 und 100 liegen.",
+    "Maximum documents for AI evaluation must be between 1 and 25.": "Die maximale Anzahl der Dokumente für die KI-Auswertung muss zwischen 1 und 25 liegen.",
     "Maximum documents for AI evaluation cannot exceed maximum Elasticsearch hits.": "Die maximale Anzahl der Dokumente für die KI-Auswertung darf die maximale Anzahl der Elasticsearch-Treffer nicht überschreiten.",
     "Clear stored password": "Gespeichertes Passwort löschen",
     "Clear stored API key": "Gespeicherten API-Schlüssel löschen",
