@@ -848,6 +848,16 @@ namespace {
         check(($http->calls[0]['options']['timeout'] ?? null) === 60, 'LLM connection test timeout is not 60 seconds');
     };
 
+    $tests['admin UI links to the public administration guide'] = function () use ($root): void {
+        $template = file_get_contents($root . '/templates/admin.php');
+        check(is_string($template), 'Admin template could not be read');
+        check(
+            str_contains($template, 'https://github.com/Eboracum-de/sunaq-find/blob/main/docs/ADMIN.md'),
+            'Admin UI does not link to the public ADMIN.md guide'
+        );
+        check(str_contains($template, 'Administration guide'), 'Admin documentation link label missing');
+    };
+
     $tests['admin UI exposes stored configuration connection tests'] = function () use ($root): void {
         $routes = file_get_contents($root . '/appinfo/routes.php');
         $template = file_get_contents($root . '/templates/admin.php');
@@ -955,8 +965,9 @@ namespace {
         $template = file_get_contents($root . '/templates/admin.php');
         $script = file_get_contents($root . '/js/admin.js');
         $config = file_get_contents($root . '/lib/Service/ConfigService.php');
+        $controller = file_get_contents($root . '/lib/Controller/AdminController.php');
         $search = file_get_contents($root . '/lib/Service/ElasticsearchSearch.php');
-        check(is_string($template) && is_string($script) && is_string($config) && is_string($search), 'Retrieval control files could not be read');
+        check(is_string($template) && is_string($script) && is_string($config) && is_string($controller) && is_string($search), 'Retrieval control files could not be read');
         check(str_contains($template, 'Use ACL metadata prefilter'), 'ACL prefilter checkbox missing');
         check(str_contains($template, 'Maximum Elasticsearch hits'), 'Elasticsearch hit limit input missing');
         check(str_contains($template, 'Maximum documents for AI evaluation'), 'AI document limit input missing');
@@ -968,6 +979,10 @@ namespace {
         check(str_contains($template, 'id="sunaqfind-search-document-limit" type="number" min="1" max="100"'), 'Admin UI does not allow an Elasticsearch horizon up to 100');
         check(str_contains($config, "intValue('llm_document_limit', 12, 1, 25)"), 'AI document limit does not default to 12 with a 25-document ceiling');
         check(str_contains($template, 'id="sunaqfind-llm-document-limit" type="number" min="1" max="25"'), 'Admin UI does not allow AI evaluation up to 25 documents');
+        check(str_contains($controller, '$searchDocumentLimit > 100'), 'Admin controller still rejects the documented Elasticsearch ceiling');
+        check(str_contains($controller, '$llmDocumentLimit > 25'), 'Admin controller still rejects the documented AI evaluation ceiling');
+        check(str_contains($controller, 'Maximum Elasticsearch hits must be between 1 and 100.'), 'Admin controller reports an outdated Elasticsearch limit');
+        check(str_contains($controller, 'Maximum documents for AI evaluation must be between 1 and 25.'), 'Admin controller reports an outdated AI evaluation limit');
         check(!str_contains($search, 'candidateBudget'), 'Elasticsearch search still contains automatic overfetch logic');
     };
 
