@@ -40,6 +40,9 @@ final class RetrievalPlanner {
             foreach ($constraintKinds as $sourceKind => $appliedKind) {
                 foreach (($safe[$sourceKind] ?? []) as $constraint) {
                     $constraint = trim((string)$constraint);
+                    if ($appliedKind === 'date' && !$this->isValidDateConstraint($constraint)) {
+                        continue;
+                    }
                     if ($constraint !== '' && !in_array($constraint, $hardConstraints, true)) {
                         $hardConstraints[] = $constraint;
                         $appliedConstraints[] = [
