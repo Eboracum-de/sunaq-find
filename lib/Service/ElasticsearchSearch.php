@@ -153,7 +153,22 @@ final class ElasticsearchSearch {
             }
 
             $allowedBefore = count($state['allowed']);
-            $searchResult = $this->executeSearch($cfg, $body);
+            try {
+                $searchResult = $this->executeSearch($cfg, $body);
+            } catch (\RuntimeException $e) {
+                if ($stageId !== 'expanded') {
+                    throw $e;
+                }
+                $retrievalStages[] = [
+                    'stage' => 'expanded',
+                    'executed' => false,
+                    'reason' => 'expanded_search_failed',
+                    'authorized_added' => 0,
+                    'query_body' => $baseBody,
+                ];
+                break;
+            }
+
             $this->authorizeHits(
                 $searchResult['hits'],
                 $state,
