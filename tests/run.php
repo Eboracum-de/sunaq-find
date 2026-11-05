@@ -887,7 +887,7 @@ namespace {
         check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
         check(str_contains($search, '$isListRequest'), 'Search controller does not distinguish retrieval-only list requests');
         check(str_contains($search, '$isHelpRequest'), 'Search controller does not allow configuration-independent help requests');
-        check(str_contains($search, "$elastic['url'] !== '' && $elastic['index'] !== ''"), 'List readiness does not require Elasticsearch only');
+        check(str_contains($search, '$elastic[\'url\'] !== \'\' && $elastic[\'index\'] !== \'\''), 'List readiness does not require Elasticsearch only');
         check(str_contains($search, '$ready = $this->config->isConfigured();'), 'Normal search requests are not guarded by full configuration readiness');
         check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
     };
