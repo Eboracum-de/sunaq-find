@@ -753,7 +753,7 @@ namespace {
         check(str_contains($answerer, 'prefer a compact Markdown table'), 'Answer prompt lost structured presentation guidance');
         check(str_contains($answerer, 'never collapse several Markdown table rows onto'), 'Answer prompt does not require physical table row line breaks');
         check(str_contains((string)$main, "\$l->t('Ask questions about your Nextcloud documents with AI.')"), 'Main template is not localized');
-        check(str_contains((string)$admin, "\$l->t('Connection tests use the currently saved configuration. Save changes before testing.')"), 'Admin template is not localized');
+        check(str_contains((string)$admin, "\$l->t('Changes only take effect after saving. Connection tests always use the saved configuration.')"), 'Admin template is not localized');
         check(str_contains((string)$searchJs, "t('sunaqfind', 'Searching …')"), 'Search JavaScript is not localized');
         check(is_array($de) && (($de['translations']['Search'] ?? '') === 'Suchen'), 'German translation catalog is missing core UI strings');
         check(
@@ -867,7 +867,7 @@ namespace {
         check(str_contains($routes, '/admin/test/llm'), 'LLM admin test route missing');
         check(str_contains($template, 'Test Elasticsearch'), 'Elasticsearch test button missing');
         check(str_contains($template, 'Test AI'), 'AI test button missing');
-        check(str_contains($template, 'currently saved configuration'), 'Saved-config test semantics are not explained');
+        check(str_contains($template, 'saved configuration'), 'Saved-config test semantics are not explained');
         check(str_contains($script, '/admin/test/elasticsearch'), 'Elasticsearch test button is not wired');
         check(str_contains($script, '/admin/test/llm'), 'LLM test button is not wired');
         check(str_contains($template, 'Changes only take effect after saving.'), 'Admin UI does not prominently explain save-before-effect semantics');
@@ -885,7 +885,7 @@ namespace {
         check(str_contains($page, "'settings.AdminSettings.index'"), 'Admin first-run link does not use the Nextcloud settings route');
         check(str_contains($template, "if (empty(\$_['configured']))"), 'Main page does not render a dedicated first-run state');
         check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
-        check(str_contains($search, 'if (!\$this->config->isConfigured())'), 'Direct search requests are not guarded before setup');
+        check(str_contains($search, 'if (!$this->config->isConfigured())'), 'Direct search requests are not guarded before setup');
         check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
     };
 
