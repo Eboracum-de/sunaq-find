@@ -22,6 +22,8 @@
     <website>https://github.com/Eboracum-de/sunaq-find</website>
     <bugs>https://github.com/Eboracum-de/sunaq-find/issues</bugs>
     <repository type="git">https://github.com/Eboracum-de/sunaq-find.git</repository>
+    <screenshot small-thumbnail="https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/app-dark.svg">https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/search.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/admin.png</screenshot>
     <dependencies>
         <nextcloud min-version="23" max-version="35" />
         <php min-version="7.4" />

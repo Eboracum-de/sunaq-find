@@ -6,6 +6,7 @@
 - Link administrators directly to SunaQ Find settings while showing non-admin users a neutral setup notice.
 - Guard search requests until the required Elasticsearch and AI endpoints are configured.
 - Clarify that all administration changes become effective only after saving and that connection tests use saved values.
+- Add App Store screenshots and a small SunaQ Find preview thumbnail.
 
 ## 0.4.2
 

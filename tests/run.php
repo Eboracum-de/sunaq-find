@@ -895,6 +895,18 @@ namespace {
         check(is_string($info) && is_string($changelog), 'Release metadata could not be read');
         check(str_contains($info, '<version>0.4.3</version>'), 'App version was not bumped to 0.4.3');
         check(str_contains($changelog, '## 0.4.3'), '0.4.3 changelog entry is missing');
+        check(
+            str_contains($info, 'small-thumbnail="https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/app-dark.svg"'),
+            'App Store thumbnail metadata is missing'
+        );
+        check(
+            str_contains($info, 'https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/search.png'),
+            'App Store search screenshot metadata is missing'
+        );
+        check(
+            str_contains($info, 'https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/admin.png'),
+            'App Store admin screenshot metadata is missing'
+        );
     };
 
     $tests['fresh installs allow configured private endpoints by default'] = function () use ($root): void {
