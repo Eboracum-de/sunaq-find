@@ -41,7 +41,19 @@ final class SearchController extends Controller {
      * @param string $plannerReasoning
      */
     public function run($query = '', $plannerReasoning = 'current'): DataResponse {
-        if (!$this->config->isConfigured()) {
+        $trimmedQuery = trim((string)$query);
+        $isHelpRequest = strcasecmp($trimmedQuery, '/help') === 0;
+        $isListRequest = preg_match('/^\/list(?:\s|$)/iu', $trimmedQuery) === 1;
+
+        $ready = $isHelpRequest;
+        if ($isListRequest) {
+            $elastic = $this->config->getElasticConfig();
+            $ready = $elastic['url'] !== '' && $elastic['index'] !== '';
+        } elseif (!$isHelpRequest) {
+            $ready = $this->config->isConfigured();
+        }
+
+        if (!$ready) {
             return new DataResponse([
                 'ok' => false,
                 'error' => $this->t('SunaQ Find is not configured yet. Please contact an administrator.'),

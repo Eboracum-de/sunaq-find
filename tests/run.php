@@ -885,8 +885,39 @@ namespace {
         check(str_contains($page, "'settings.AdminSettings.index'"), 'Admin first-run link does not use the Nextcloud settings route');
         check(str_contains($template, "if (empty(\$_['configured']))"), 'Main page does not render a dedicated first-run state');
         check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
-        check(str_contains($search, 'if (!$this->config->isConfigured())'), 'Direct search requests are not guarded before setup');
+        check(str_contains($search, '$isListRequest'), 'Search controller does not distinguish retrieval-only list requests');
+        check(str_contains($search, '$isHelpRequest'), 'Search controller does not allow configuration-independent help requests');
+        check(str_contains($search, "$elastic['url'] !== '' && $elastic['index'] !== ''"), 'List readiness does not require Elasticsearch only');
+        check(str_contains($search, '$ready = $this->config->isConfigured();'), 'Normal search requests are not guarded by full configuration readiness');
         check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
+    };
+
+    $tests['isConfigured evaluates required Elasticsearch and LLM settings'] = function (): void {
+        $empty = new class extends ConfigService {
+            public function __construct() {}
+
+            public function getElasticConfig(): array {
+                return ['url' => '', 'index' => ''];
+            }
+
+            public function getLlmConfig(): array {
+                return ['url' => '', 'model' => ''];
+            }
+        };
+        check($empty->isConfigured() === false, 'Empty settings are reported as configured');
+
+        $ready = new class extends ConfigService {
+            public function __construct() {}
+
+            public function getElasticConfig(): array {
+                return ['url' => 'http://elasticsearch:9200', 'index' => 'nextcloud_fulltext'];
+            }
+
+            public function getLlmConfig(): array {
+                return ['url' => 'http://ollama:11434/v1', 'model' => 'qwen3:8b'];
+            }
+        };
+        check($ready->isConfigured() === true, 'Complete required settings are reported as unconfigured');
     };
 
     $tests['0.4.3 metadata is prepared for the setup UX release'] = function () use ($root): void {
