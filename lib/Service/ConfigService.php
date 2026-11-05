@@ -170,6 +170,16 @@ class ConfigService {
     }
 
 
+    public function isConfigured(): bool {
+        $elastic = $this->getElasticConfig();
+        $llm = $this->getLlmConfig();
+
+        return $elastic['url'] !== ''
+            && $elastic['index'] !== ''
+            && $llm['url'] !== ''
+            && $llm['model'] !== '';
+    }
+
     public function publicStatus(): array {
         $elastic = $this->getElasticConfig();
         $llm = $this->getLlmConfig();

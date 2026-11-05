@@ -8,8 +8,13 @@ style('sunaqfind', 'probe');
     <p>
         <a href="https://github.com/Eboracum-de/sunaq-find/blob/main/docs/ADMIN.md" target="_blank" rel="noopener noreferrer"><?php p($l->t('Administration guide')); ?></a>
     </p>
-    <p><?php p($l->t('Leave Elasticsearch URL/index empty to use the first host and index detected from fulltextsearch_elasticsearch.')); ?></p>
-    <p><em><?php p($l->t('Connection tests use the currently saved configuration. Save changes before testing.')); ?></em></p>
+    <div class="sunaqfind-admin-setup-note">
+        <p><strong><?php p($l->t('Initial setup:')); ?></strong>
+            <?php p($l->t('Verify the detected Elasticsearch configuration or enter it manually, then configure the AI endpoint, model and API key as required by your provider.')); ?>
+        </p>
+        <p><?php p($l->t('Leave Elasticsearch URL/index empty to use the first host and index detected from fulltextsearch_elasticsearch.')); ?></p>
+        <p class="sunaqfind-admin-save-note"><strong><?php p($l->t('Changes only take effect after saving. Connection tests always use the saved configuration.')); ?></strong></p>
+    </div>
 
     <h3>Elasticsearch</h3>
     <p>

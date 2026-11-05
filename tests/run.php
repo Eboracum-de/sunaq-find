@@ -753,7 +753,7 @@ namespace {
         check(str_contains($answerer, 'prefer a compact Markdown table'), 'Answer prompt lost structured presentation guidance');
         check(str_contains($answerer, 'never collapse several Markdown table rows onto'), 'Answer prompt does not require physical table row line breaks');
         check(str_contains((string)$main, "\$l->t('Ask questions about your Nextcloud documents with AI.')"), 'Main template is not localized');
-        check(str_contains((string)$admin, "\$l->t('Connection tests use the currently saved configuration. Save changes before testing.')"), 'Admin template is not localized');
+        check(str_contains((string)$admin, "\$l->t('Changes only take effect after saving. Connection tests always use the saved configuration.')"), 'Admin template is not localized');
         check(str_contains((string)$searchJs, "t('sunaqfind', 'Searching …')"), 'Search JavaScript is not localized');
         check(is_array($de) && (($de['translations']['Search'] ?? '') === 'Suchen'), 'German translation catalog is missing core UI strings');
         check(
@@ -867,9 +867,77 @@ namespace {
         check(str_contains($routes, '/admin/test/llm'), 'LLM admin test route missing');
         check(str_contains($template, 'Test Elasticsearch'), 'Elasticsearch test button missing');
         check(str_contains($template, 'Test AI'), 'AI test button missing');
-        check(str_contains($template, 'currently saved configuration'), 'Saved-config test semantics are not explained');
+        check(str_contains($template, 'saved configuration'), 'Saved-config test semantics are not explained');
         check(str_contains($script, '/admin/test/elasticsearch'), 'Elasticsearch test button is not wired');
         check(str_contains($script, '/admin/test/llm'), 'LLM test button is not wired');
+        check(str_contains($template, 'Changes only take effect after saving.'), 'Admin UI does not prominently explain save-before-effect semantics');
+    };
+
+    $tests['first-run configuration state blocks an unusable search UI'] = function () use ($root): void {
+        $config = file_get_contents($root . '/lib/Service/ConfigService.php');
+        $page = file_get_contents($root . '/lib/Controller/PageController.php');
+        $search = file_get_contents($root . '/lib/Controller/SearchController.php');
+        $template = file_get_contents($root . '/templates/main.php');
+
+        check(is_string($config) && is_string($page) && is_string($search) && is_string($template), 'First-run setup sources could not be read');
+        check(str_contains($config, 'public function isConfigured(): bool'), 'Configuration readiness check is missing');
+        check(str_contains($page, "'configured' => \$configured"), 'Page controller does not expose configuration readiness');
+        check(str_contains($page, "'settings.AdminSettings.index'"), 'Admin first-run link does not use the Nextcloud settings route');
+        check(str_contains($template, "if (empty(\$_['configured']))"), 'Main page does not render a dedicated first-run state');
+        check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
+        check(str_contains($search, '$isListRequest'), 'Search controller does not distinguish retrieval-only list requests');
+        check(str_contains($search, '$isHelpRequest'), 'Search controller does not allow configuration-independent help requests');
+        check(str_contains($search, '$elastic[\'url\'] !== \'\' && $elastic[\'index\'] !== \'\''), 'List readiness does not require Elasticsearch only');
+        check(str_contains($search, '$ready = $this->config->isConfigured();'), 'Normal search requests are not guarded by full configuration readiness');
+        check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
+    };
+
+    $tests['isConfigured evaluates required Elasticsearch and LLM settings'] = function (): void {
+        $empty = new class extends ConfigService {
+            public function __construct() {}
+
+            public function getElasticConfig(): array {
+                return ['url' => '', 'index' => ''];
+            }
+
+            public function getLlmConfig(): array {
+                return ['url' => '', 'model' => ''];
+            }
+        };
+        check($empty->isConfigured() === false, 'Empty settings are reported as configured');
+
+        $ready = new class extends ConfigService {
+            public function __construct() {}
+
+            public function getElasticConfig(): array {
+                return ['url' => 'http://elasticsearch:9200', 'index' => 'nextcloud_fulltext'];
+            }
+
+            public function getLlmConfig(): array {
+                return ['url' => 'http://ollama:11434/v1', 'model' => 'qwen3:8b'];
+            }
+        };
+        check($ready->isConfigured() === true, 'Complete required settings are reported as unconfigured');
+    };
+
+    $tests['0.4.3 metadata is prepared for the setup UX release'] = function () use ($root): void {
+        $info = file_get_contents($root . '/appinfo/info.xml');
+        $changelog = file_get_contents($root . '/CHANGELOG.md');
+        check(is_string($info) && is_string($changelog), 'Release metadata could not be read');
+        check(str_contains($info, '<version>0.4.3</version>'), 'App version was not bumped to 0.4.3');
+        check(str_contains($changelog, '## 0.4.3'), '0.4.3 changelog entry is missing');
+        check(
+            str_contains($info, 'small-thumbnail="https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/app-dark.svg"'),
+            'App Store thumbnail metadata is missing'
+        );
+        check(
+            str_contains($info, 'https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/search.png'),
+            'App Store search screenshot metadata is missing'
+        );
+        check(
+            str_contains($info, 'https://raw.githubusercontent.com/Eboracum-de/sunaq-find/main/img/store/admin.png'),
+            'App Store admin screenshot metadata is missing'
+        );
     };
 
     $tests['fresh installs allow configured private endpoints by default'] = function () use ($root): void {
@@ -930,7 +998,7 @@ namespace {
         check(str_contains($controller, '$this->request->getParams()'), 'Admin save still relies on implicit controller parameter binding');
         check(str_contains($controller, 'array_key_exists($key, $values)'), 'Admin boolean parser cannot distinguish missing values');
         check(str_contains($script, "setChecked('sunaqfind-analysis-mode', config.analysis_mode)"), 'Saved analysis mode is not reflected from server state');
-        check(str_contains($script, "'Saved – analysis mode '"), 'Admin save confirmation does not report effective analysis mode');
+        check(str_contains($script, "'Configuration saved. Connection tests now use these saved values.'"), 'Admin save confirmation does not explain the save-before-test flow');
     };
 
     $tests['ACL validator keeps PHP 7.4-compatible declared dependencies'] = function () use ($root): void {
