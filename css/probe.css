@@ -442,3 +442,25 @@
     min-width: 280px;
     overflow-wrap: anywhere;
 }
+
+
+.sunaqfind-admin-setup-note {
+    max-width: 760px;
+    margin: 14px 0 22px;
+    padding: 14px 16px;
+    border-inline-start: 4px solid var(--color-primary-element, #00679e);
+    border-radius: var(--border-radius, 6px);
+    background: var(--color-primary-element-light, #e8f3f8);
+}
+
+.sunaqfind-admin-setup-note p {
+    margin: 0 0 8px;
+}
+
+.sunaqfind-admin-setup-note p:last-child {
+    margin-bottom: 0;
+}
+
+.sunaqfind-admin-save-note {
+    padding-top: 4px;
+}

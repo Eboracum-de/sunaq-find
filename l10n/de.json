@@ -5,7 +5,7 @@
     "Leave Elasticsearch URL/index empty to use the first host and index detected from fulltextsearch_elasticsearch.": "Elasticsearch-URL und -Index leer lassen, um den ersten aus fulltextsearch_elasticsearch erkannten Host und Index zu verwenden.",
     "Initial setup:": "Ersteinrichtung:",
     "Verify the detected Elasticsearch configuration or enter it manually, then configure the AI endpoint, model and API key as required by your provider.": "Prüfen Sie die erkannte Elasticsearch-Konfiguration oder tragen Sie sie manuell ein. Konfigurieren Sie anschließend den KI-Endpunkt, das Modell und – soweit vom Anbieter benötigt – den API-Schlüssel.",
-    "Connection tests use the currently saved configuration. Save endpoint, model or credential changes before testing; unsaved values are ignored.": "Die Verbindungstests verwenden die aktuell gespeicherte Konfiguration. Änderungen an Endpunkt, Modell oder Zugangsdaten daher vor dem Test speichern; nicht gespeicherte Werte werden nicht getestet.",
+    "Changes only take effect after saving. Connection tests always use the saved configuration.": "Änderungen werden erst nach dem Speichern wirksam. Verbindungstests verwenden immer die gespeicherte Konfiguration.",
     "Index": "Index",
     "Username (optional)": "Benutzername (optional)",
     "Password (optional)": "Passwort (optional)",

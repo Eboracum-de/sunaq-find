@@ -870,7 +870,7 @@ namespace {
         check(str_contains($template, 'currently saved configuration'), 'Saved-config test semantics are not explained');
         check(str_contains($script, '/admin/test/elasticsearch'), 'Elasticsearch test button is not wired');
         check(str_contains($script, '/admin/test/llm'), 'LLM test button is not wired');
-        check(str_contains($template, 'unsaved values are ignored'), 'Admin UI does not warn that unsaved connection values are ignored');
+        check(str_contains($template, 'Changes only take effect after saving.'), 'Admin UI does not prominently explain save-before-effect semantics');
     };
 
     $tests['first-run configuration state blocks an unusable search UI'] = function () use ($root): void {
@@ -887,6 +887,14 @@ namespace {
         check(str_contains($template, 'Open administration settings'), 'First-run admin action is missing');
         check(str_contains($search, 'if (!\$this->config->isConfigured())'), 'Direct search requests are not guarded before setup');
         check(str_contains($search, 'SunaQ Find is not configured yet. Please contact an administrator.'), 'Search API setup error is not explicit');
+    };
+
+    $tests['0.4.3 metadata is prepared for the setup UX release'] = function () use ($root): void {
+        $info = file_get_contents($root . '/appinfo/info.xml');
+        $changelog = file_get_contents($root . '/CHANGELOG.md');
+        check(is_string($info) && is_string($changelog), 'Release metadata could not be read');
+        check(str_contains($info, '<version>0.4.3</version>'), 'App version was not bumped to 0.4.3');
+        check(str_contains($changelog, '## 0.4.3'), '0.4.3 changelog entry is missing');
     };
 
     $tests['fresh installs allow configured private endpoints by default'] = function () use ($root): void {

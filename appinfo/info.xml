@@ -7,7 +7,7 @@
     <summary lang="de">KI-gestützte Suche über Nextcloud FullTextSearch</summary>
     <description lang="en">Native Nextcloud app for AI-assisted questions over existing FullTextSearch documents with live ACL checks.</description>
     <description lang="de">Native Nextcloud-App für KI-gestützte Fragen an vorhandene FullTextSearch-Dokumente mit Live-ACL-Prüfung.</description>
-    <version>0.4.2</version>
+    <version>0.4.3</version>
     <licence>AGPL-3.0-or-later</licence>
     <author>Eboracum GmbH</author>
     <namespace>SunaqFind</namespace>

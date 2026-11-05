@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+- Add a dedicated first-run state when Elasticsearch or AI configuration is incomplete.
+- Link administrators directly to SunaQ Find settings while showing non-admin users a neutral setup notice.
+- Guard search requests until the required Elasticsearch and AI endpoints are configured.
+- Clarify that all administration changes become effective only after saving and that connection tests use saved values.
+
 ## 0.4.2
 
 - Reject positive AI answers that cannot be tied to valid evidence citations.
